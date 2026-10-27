@@ -1,0 +1,7 @@
+POST /api/items HTTP/1.1
+Host: a
+Authorization: Bearer *
+Content-Type: application/json
+Content-Length: 35
+
+{"name":"lamp","value":3,"on":true}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Madoguchi SD files</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+<h1>Files on the SD card</h1>
+<p>This page runs on the board. Read the <a href="/docs">API docs</a> or the <a href="/api/openapi.json">OpenAPI document</a>.</p>
+<section aria-labelledby="files-title">
+<h2 id="files-title">Files</h2>
+<ul id="files"></ul>
+</section>
+<section aria-labelledby="upload-title">
+<h2 id="upload-title">Upload</h2>
+<form id="upload">
+<label for="file">File, with an 8.3 name such as LOG.TXT</label>
+<input id="file" name="file" type="file" required>
+<progress id="progress" max="1" value="0" aria-label="Upload progress"></progress>
+<button type="submit">Upload</button>
+</form>
+</section>
+<p id="status" role="status" aria-live="polite"></p>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+GET /api/files/HELLO.TXT?download=1 HTTP/1.1
+Host: mado.test
+If-None-Match: W/"0-0"
+

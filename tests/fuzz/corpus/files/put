@@ -1,0 +1,7 @@
+PUT /api/files/NEW.TXT HTTP/1.1
+Host: mado.test
+Content-Type: application/octet-stream
+Repr-Digest: sha-256=:JCp9WY2YZ7vHZKDNi0/HUEZ+XrFakG9MSXOTZb/TCEo=:
+Content-Length: 14
+
+fuzz seed body

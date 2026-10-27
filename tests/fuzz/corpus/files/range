@@ -1,0 +1,4 @@
+GET /api/files/HELLO.TXT HTTP/1.1
+Host: mado.test
+Range: bytes=2-5
+

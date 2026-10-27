@@ -1,0 +1,4 @@
+GET /echo?name=a%20b HTTP/1.1
+Host: board.local:80
+X-Trace: t
+

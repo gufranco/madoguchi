@@ -1,0 +1,6 @@
+POST /api/auth/login HTTP/1.1
+Host: a
+Content-Type: application/json
+Content-Length: 55
+
+{"username":"admin","password":"correct-horse-battery"}

@@ -1,0 +1,237 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Madoguchi REST API",
+    "version": "1.0.0",
+    "description": "Items kept in RAM on the board. Reads are public; writes need a bearer token from POST /api/auth/login, valid for 15 minutes and until the board restarts."
+  },
+  "servers": [{ "url": "/" }],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "status"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 40 },
+          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+          "detail": { "type": "string", "maxLength": 64 }
+        }
+      },
+      "Credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "maxLength": 16 },
+          "password": { "type": "string", "maxLength": 64 }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["access_token", "token_type", "expires_in"],
+        "properties": {
+          "access_token": { "type": "string", "maxLength": 200 },
+          "token_type": { "type": "string", "maxLength": 6 },
+          "expires_in": { "type": "integer", "minimum": 1, "maximum": 900 }
+        }
+      },
+      "Item": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value", "on"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 1, "maximum": 254, "readOnly": true },
+          "name": { "type": "string", "maxLength": 16 },
+          "value": { "type": "integer", "minimum": -100000, "maximum": 100000 },
+          "on": { "type": "boolean" }
+        }
+      },
+      "ItemPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "x-mado-writer": true,
+        "minProperties": 1,
+        "properties": {
+          "name": { "type": "string", "maxLength": 16 },
+          "value": { "type": "integer", "minimum": -100000, "maximum": 100000 },
+          "on": { "type": "boolean" }
+        }
+      }
+    },
+    "parameters": {
+      "ItemId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer", "minimum": 1, "maximum": 254 }
+      }
+    },
+    "responses": {
+      "BadRequest": { "description": "Malformed JSON or missing body", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "Unauthorized": { "description": "Missing, invalid or expired token" },
+      "NotFound": { "description": "No item with this id", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "Unsupported": { "description": "Content-Type is not application/json", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "TooLarge": { "description": "The body is larger than this operation accepts", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "Invalid": { "description": "A field is missing, unknown, too long or out of range", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+    }
+  },
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Exchange credentials for a bearer token",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Credentials" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Token issued",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Token" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "401": { "description": "Wrong user name or password" },
+          "415": { "$ref": "#/components/responses/Unsupported" },
+          "422": { "$ref": "#/components/responses/Invalid" },
+          "429": { "description": "Five failures in a row lock login for 15 minutes" },
+          "503": { "description": "The board has no signing key yet", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      }
+    },
+    "/api/items": {
+      "get": {
+        "operationId": "listItems",
+        "summary": "List every item",
+        "responses": {
+          "200": {
+            "description": "All items",
+            "content": {
+              "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createItem",
+        "summary": "Create an item",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "415": { "$ref": "#/components/responses/Unsupported" },
+          "422": { "$ref": "#/components/responses/Invalid" },
+          "507": { "description": "Every slot is taken", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      }
+    },
+    "/api/items/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/ItemId" }],
+      "get": {
+        "operationId": "getItem",
+        "summary": "Read one item",
+        "responses": {
+          "200": {
+            "description": "The item",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "replaceItem",
+        "summary": "Replace every field of an item",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "415": { "$ref": "#/components/responses/Unsupported" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      },
+      "patch": {
+        "operationId": "updateItem",
+        "summary": "Change some fields of an item",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemPatch" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "415": { "$ref": "#/components/responses/Unsupported" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteItem",
+        "summary": "Delete an item",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/log": {
+      "get": {
+        "operationId": "readLog",
+        "summary": "Read the request log, one JSON object per line",
+        "description": "Each line holds level, boot, uptime in milliseconds, hostname, req.id, req.method, req.url, res.statusCode, responseTime and msg, in the shape pino-http writes. Send Range: bytes=-4096 to read only the end.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "Range", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "The whole log", "content": { "application/x-ndjson": {} } },
+          "206": { "description": "One byte range of the log", "content": { "application/x-ndjson": {} } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "416": { "description": "The range starts past the end of the log" },
+          "503": { "description": "The SD card is missing or holds no log yet", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      },
+      "delete": {
+        "operationId": "clearLog",
+        "summary": "Delete the log and its rotated copy",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "description": "The SD card is missing", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      }
+    }
+  }
+}

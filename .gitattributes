@@ -1,0 +1,2 @@
+tests/fuzz/corpus/** binary
+*.bat text eol=crlf

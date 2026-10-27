@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Madoguchi REST API</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+<h1>Madoguchi REST API</h1>
+<p>This page runs on the board. Read the <a href="/docs">API docs</a> or the <a href="/api/openapi.json">OpenAPI document</a>.</p>
+<section aria-labelledby="login-title">
+<h2 id="login-title">Sign in</h2>
+<form id="login">
+<label for="user">User name</label>
+<input id="user" name="username" autocomplete="username" maxlength="16" required>
+<label for="pass">Password</label>
+<input id="pass" name="password" type="password" autocomplete="current-password" maxlength="64" required>
+<button type="submit">Sign in</button>
+</form>
+</section>
+<section aria-labelledby="items-title">
+<h2 id="items-title">Items</h2>
+<ul id="items"></ul>
+<form id="add">
+<label for="name">Name</label>
+<input id="name" maxlength="16" required>
+<label for="value">Value</label>
+<input id="value" type="number" min="-100000" max="100000" value="0" required>
+<label class="check"><input id="on" type="checkbox"> On</label>
+<button type="submit">Add item</button>
+</form>
+</section>
+<section aria-labelledby="log-title">
+<h2 id="log-title">Log</h2>
+<button id="show-log" type="button">Show the end of the log</button>
+<pre id="log"></pre>
+</section>
+<p id="status" role="status" aria-live="polite"></p>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
