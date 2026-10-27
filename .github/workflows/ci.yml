@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPPCHECK_VERSION: "2.22.0"
+  CPPCHECK_SHA256: d74945deb2d50393430e07596b766f8a779512c7f60dac2a30ea64e059ece57b
+
+jobs:
+  host:
+    name: Host tests and analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install Python tools
+        run: >-
+          python3 -m pip install --user --break-system-packages
+          clang-format==23.1.3 clang-tidy==23.1.3 gcovr==8.6 ruff==0.17.0 pytest==9.1.1
+
+      - name: Install ctags
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends universal-ctags
+
+      - name: Restore cppcheck
+        id: cppcheck-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/cppcheck
+          key: cppcheck-${{ env.CPPCHECK_VERSION }}-ubuntu-24.04
+
+      - name: Build cppcheck
+        if: steps.cppcheck-cache.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --silent --show-error --location --output cppcheck.tar.gz \
+            "https://github.com/danmar/cppcheck/archive/refs/tags/${CPPCHECK_VERSION}.tar.gz"
+          echo "${CPPCHECK_SHA256}  cppcheck.tar.gz" | sha256sum --check
+          tar xzf cppcheck.tar.gz
+          cmake -S "cppcheck-${CPPCHECK_VERSION}" -B cppcheck-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${HOME}/cppcheck" -DFILESDIR="${HOME}/cppcheck/share/cppcheck"
+          cmake --build cppcheck-build --parallel 4
+          cmake --install cppcheck-build
+
+      - name: Configure
+        run: cmake -S tests -B build -DCMAKE_BUILD_TYPE=Debug -DMADO_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Coverage
+        run: >-
+          gcovr build --root . --filter src/ --merge-lines --exclude-throw-branches
+          --exclude-unreachable-branches --fail-under-line 95 --fail-under-function 95 --txt
+
+      - name: Format
+        run: >-
+          clang-format --dry-run --Werror src/*.h src/mado/*.h tests/*.cpp tests/examples/*.cpp
+          tests/fuzz/*.cpp tests/fuzz/*.h tests/support/* tests/shim/*.h tests/host_server/*
+          examples/*/*App.h examples/RestApi/RestStore.h
+
+      - name: Format examples
+        run: |
+          for sketch in examples/*/*.ino; do
+            clang-format --dry-run --Werror --assume-filename=sketch.cpp "${sketch}"
+          done
+
+      - name: clang-tidy
+        run: clang-tidy -p build tests/*.cpp tests/examples/*.cpp tests/fuzz/*.cpp
+
+      - name: cppcheck
+        run: >-
+          "${HOME}/cppcheck/bin/cppcheck" --project=build/compile_commands.json --enable=all
+          --inconclusive --library=googletest --error-exitcode=1 --suppress=missingIncludeSystem
+          --check-level=exhaustive -i build/_deps --file-filter='*/tests/*' --quiet
+
+      - name: Assertion density
+        run: python3 tools/assertion_density.py
+
+      - name: Tools
+        run: |
+          suites=(tests/assertion_density tests/size_gate tests/madogen tests/throughput)
+          ruff check tools "${suites[@]}"
+          ruff format --check tools "${suites[@]}"
+          python3 -m pytest -q "${suites[@]}" -p no:cacheprovider
+
+      - name: Generated code matches its sources
+        run: >-
+          python3 -m tools.madogen check examples/RestApi examples/RestAuth examples/RestGet
+          examples/RestPost examples/RestPut examples/RestPatch examples/RestDelete examples/RestFiles
+
+      - name: Page scripts
+        run: node --test tests/web/*.test.mjs
+
+  fuzz:
+    name: Fuzzing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install clang
+        run: >-
+          sudo apt-get update && sudo apt-get install --yes --no-install-recommends
+          clang-18 libclang-rt-18-dev
+
+      - name: Configure
+        run: >-
+          cmake -S tests -B fuzz-build -DMADO_FUZZ=ON -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++-18
+
+      - name: Build
+        run: >-
+          cmake --build fuzz-build --parallel 4
+          --target mado_fuzz_request mado_fuzz_rest mado_fuzz_files mado_fuzz_json mado_fuzz_text
+
+      - name: Fuzz each target for a minute
+        run: |
+          for target in request rest files json text; do
+            mkdir -p "fuzz-corpus/${target}"
+            "fuzz-build/mado_fuzz_${target}" -max_total_time=60 -max_len=2048 \
+              "fuzz-corpus/${target}" "tests/fuzz/corpus/${target}"
+          done
+
+  firmware:
+    name: Firmware builds and size gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install arduino-cli
+        env:
+          ARDUINO_CLI_VERSION: "1.5.1"
+          ARDUINO_CLI_SHA256: 28a8e119c498a25607821c36cb2dc49e8463941b261a0d99091baa7bc692dd2b
+        run: |
+          archive="arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz"
+          curl --fail --silent --show-error --location --output "${archive}" \
+            "https://downloads.arduino.cc/arduino-cli/${archive}"
+          echo "${ARDUINO_CLI_SHA256}  ${archive}" | sha256sum --check
+          mkdir -p "${HOME}/.local/bin"
+          tar xzf "${archive}" -C "${HOME}/.local/bin" arduino-cli
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Install cores and libraries
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr@1.8.8 arduino:renesas_uno@1.6.0
+          arduino-cli lib install Ethernet@2.0.2 SD@1.3.0 ArduinoJson@7.4.3 EthernetENC@2.0.5
+
+      - name: Uno, minimal example keeps 1 KB of RAM for the stack
+        run: python3 tools/size_gate.py --fqbn arduino:avr:uno --min-free-ram 1024 examples/SimpleWebServer
+
+      - name: Uno R3, every example that fits
+        run: >-
+          python3 tools/size_gate.py --fqbn arduino:avr:uno
+          examples/FormAndQuery examples/TemplatePage examples/BasicAuth examples/JsonApi
+          examples/EthernetENC examples/WebServerSD examples/FileUpload examples/BlinkLed
+          examples/RestGet examples/RestPost examples/RestPut examples/RestPatch examples/RestDelete
+
+      - name: Uno R4 Minima, every example
+        run: >-
+          python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima
+          examples/SimpleWebServer examples/FormAndQuery examples/TemplatePage examples/BasicAuth
+          examples/JsonApi examples/EthernetENC examples/WebServerSD examples/FileUpload
+          examples/BlinkLed examples/RestApi examples/RestAuth examples/RestGet examples/RestPost
+          examples/RestPut examples/RestPatch examples/RestDelete examples/RestFiles
+
+  library:
+    name: Arduino library lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: arduino/arduino-lint-action@9a3603836c75e41753e531167395edeb90ba5dae
+        with:
+          library-manager: submit
+          compliance: strict
