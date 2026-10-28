@@ -14,6 +14,6 @@ Checks: >
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -modernize-*
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/src/(mado/[^/]+|Madoguchi[A-Za-z]*)\.h$'
+HeaderFilterRegex: '.*/(src/(mado/[^/]+|Madoguchi[A-Za-z]*)|examples/[^/]+/(tests/\.\./)?src/.+)\.h$'
 ExcludeHeaderFilterRegex: '.*/_deps/.*'
 FormatStyle: file

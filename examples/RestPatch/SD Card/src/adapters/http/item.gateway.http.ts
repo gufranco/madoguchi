@@ -1,0 +1,14 @@
+import { type Fetcher, readJson } from "@madoguchi/kit/api";
+
+import type { ItemGateway } from "../../application/item.gateway.ts";
+import { Item } from "../../domain/item.entity.ts";
+
+export function createHttpItemGateway(fetcher: Fetcher): ItemGateway {
+  return {
+    change: (id, patch) =>
+      readJson(fetcher, "PATCH", `/api/items/${id}`, Item.isOne, {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      }),
+  };
+}

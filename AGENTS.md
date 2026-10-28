@@ -28,6 +28,21 @@ No HTML, CSS, JavaScript, image, font, document or OpenAPI file MAY exist inside
 
 Every third-party front-end dependency, Pico CSS and Swagger UI included, MUST load from a public CDN with an exact version and a Subresource Integrity hash. No third-party front-end file MAY be copied to the SD card or served by the board. The owner set this rule on 2026-10-27.
 
+### Every example is a layered project
+
+Each example folder MUST stand alone as a project split by bounded context and by layer. The owner asked for it on 2026-10-28.
+
+- `<Example>.ino` MUST be the composition root only: it owns the hardware objects, builds the adapters, hands them to the application services and runs `setup` and `loop`. No rule MAY live there.
+- Code MUST live under `<Example>/src`, because arduino-cli compiles that folder recursively and no other. Inside it, code MUST be grouped as `<context>/domain`, `<context>/application` and `<context>/adapters`. `src/http` holds `api.generated.h` from madogen and `api.router.h`, the type `mado::Server` dispatches to.
+- Domain headers MUST include only `<stdint.h>`, `<stddef.h>`, `<string.h>` and library headers that include no Arduino header. Domain failures MUST be enums that an adapter turns into text or HTTP problems.
+- Application headers MAY also use library primitives that do no I/O, such as `LoginGuard`, `TokenClaims` and `Sha256`. They MUST NOT include `Exchange`, `Reply` or a problem sender.
+- A port MUST be a template parameter whose required calls are written down in a `*.port.h` header with `static_assert` over `decltype` and `mado::same_type`. A port MUST list only the calls that example's use cases make. Virtual functions and function pointers stay banned.
+- Domain entities MUST be separate from the generated wire structs. Controllers map between them and `static_assert` that their sizes agree.
+- File names MUST follow `name.type.h`: `item.entity.h`, `item_repository.port.h`, `item_catalog.service.h`, `ram_item.repository.h`, `items.controller.h`. Tests MUST follow `name.type.test.cpp`.
+- Host tests for an example MUST live in `<Example>/tests`, next to a `.clang-tidy` that relaxes only the magic-number checks. CMake builds one test binary per example, so the same context name in two examples never shares a binary.
+- Each example's `SD Card/src` MUST follow the same split: `domain`, `application` with its ports, `adapters/http`, `adapters/dom` and `app.ts` as the composition root. A page MUST define its own entities; `@madoguchi/kit` holds only infrastructure.
+- CI MUST measure assertion density per example `src` tree and analyze every example header with clang-tidy and cppcheck.
+
 ### NASA/JPL coding rules
 
 All code in `src/` and [`examples/`](examples) MUST follow the JPL Institutional Coding Standard for the C Programming Language, JPL D-60411 version 1.0 of 2009-03-03, levels LOC-1 to LOC-4, and the Power of Ten rules by Gerard J. Holzmann, IEEE Computer, June 2006. Where the two differ, the stricter rule applies, and every JPL `should` rule is applied as a `shall`: the owner asked on 2026-10-26 for the strictest rules possible. The library is C++ for the Arduino toolchain, so each rule below is stated in its C++ form. Rule numbers point to the source: `JPL n` for D-60411, `P10 n` for the Power of Ten.

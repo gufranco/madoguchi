@@ -5,44 +5,48 @@
 #include <Ethernet.h>
 #include <Madoguchi.h>
 #include <SPI.h>
+#include <mado/UptimeClock.h>
 
-#include "AuthApp.h"
 #include "arduino_secrets.h"
-#include "generated_api.h"
+#include "src/http/api.generated.h"
+#include "src/http/api.router.h"
+#include "src/identity/adapters/card_failure.log.h"
+#include "src/identity/adapters/eeprom_session.counter.h"
+#include "src/identity/adapters/flash_secrets.authority.h"
+#include "src/identity/application/access.service.h"
 
 #include <SdFat.h>
 
-using WebApp = AuthApp<EthernetClient, secrets::Provisioned, SdFs, FILE_READ, FILE_WRITE>;
+using Authority = identity::FlashSecretsAuthority<secrets::Provisioned>;
+using Failures = identity::CardFailureLog<SdFs, FILE_READ, FILE_WRITE>;
+using Access = identity::AccessService<Authority, Failures>;
+using WebApp = api::Router<EthernetClient, Access, SdFs, FILE_READ>;
 
 constexpr uint8_t kSdChipSelect = 4U;
 
 SdFs sd_card;
-
-constexpr int kSessionAddress = 0;
-constexpr uint32_t kLastSession = 0x7FFFFFFFU;
+Authority authority;
+mado::UptimeClock uptime;
+identity::EepromSessionCounter<decltype(EEPROM)> sessions(EEPROM);
 
 uint8_t mac_address[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
 EthernetServer ethernet_server(80);
 mado::Server<EthernetClient, WebApp, rest_auth::Limits> web(&rest_auth::kRoutes[0],
                                                             &rest_auth::kHeaderNames[0]);
 
-uint32_t next_session() {
-  uint32_t stored = 0U;
-  static_cast<void>(EEPROM.get(kSessionAddress, stored));
-  const bool fresh = (stored == 0U) || (stored >= kLastSession);
-  const uint32_t session = fresh ? 1U : (stored + 1U);
-  static_cast<void>(EEPROM.put(kSessionAddress, session));
-  return session;
-}
-
 void setup() {
-  WebApp::begin(next_session(), sd_card, kSdChipSelect);
+  const bool card_ready = sd_card.begin(kSdChipSelect);
+  SdFs* const card = card_ready ? &sd_card : nullptr;
+  static Failures failures(card);
+  static Access access(authority, failures);
+  access.begin(sessions.advance());
+  WebApp::attach(access, uptime, card);
   Ethernet.begin(mac_address, IPAddress(192, 168, 1, 177));
   ethernet_server.begin();
 }
 
 void loop() {
-  WebApp::tick(millis());
+  uptime.advance(millis());
   EthernetClient client = ethernet_server.available();
   const bool has_client = static_cast<bool>(client);
   if (has_client) {

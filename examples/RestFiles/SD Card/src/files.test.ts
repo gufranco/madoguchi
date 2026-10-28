@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { faker } from "@faker-js/faker";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { cardName, isFileList, reprDigest } from "./files.ts";
+import { createSubtleDigester } from "./adapters/crypto/digester.subtle.ts";
+import { CardName } from "./domain/card-name.value.ts";
+import { FileEntry } from "./domain/file-entry.entity.ts";
 
 describe("files", () => {
   beforeEach(() => {
@@ -18,7 +20,7 @@ describe("files", () => {
     const chosen = name;
 
     // Act
-    const stored = cardName(chosen);
+    const stored = CardName.from(chosen);
 
     // Assert
     expect(stored).toBe(expected);
@@ -31,7 +33,7 @@ describe("files", () => {
       const chosen = name;
 
       // Act
-      const stored = cardName(chosen);
+      const stored = CardName.from(chosen);
 
       // Assert
       expect(stored).toBeUndefined();
@@ -51,7 +53,7 @@ describe("files", () => {
     };
 
     // Act
-    const header = await reprDigest(subtle, bytes.buffer);
+    const header = await createSubtleDigester(subtle).reprDigest(bytes.buffer);
 
     // Assert
     expect(header).toBe("sha-256=:LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=:");
@@ -62,12 +64,12 @@ describe("files", () => {
     const entry = { name: faker.system.commonFileName("txt"), size: 3, directory: false };
 
     // Act
-    const accepted = isFileList([entry]);
+    const accepted = FileEntry.isList([entry]);
 
     // Assert
     expect(accepted).toBe(true);
-    expect(isFileList([{ ...entry, size: "3" }])).toBe(false);
-    expect(isFileList([null])).toBe(false);
-    expect(isFileList(entry)).toBe(false);
+    expect(FileEntry.isList([{ ...entry, size: "3" }])).toBe(false);
+    expect(FileEntry.isList([null])).toBe(false);
+    expect(FileEntry.isList(entry)).toBe(false);
   });
 });

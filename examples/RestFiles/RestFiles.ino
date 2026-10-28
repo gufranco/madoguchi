@@ -12,12 +12,14 @@
 #include <mado/begin_network.h>
 #include <mado/load_mac.h>
 
-#include "FilesApp.h"
-#include "generated_api.h"
+#include "src/files/application/file_library.service.h"
+#include "src/http/api.generated.h"
+#include "src/http/api.router.h"
 
 #include <SdFat.h>
 
-using WebApp = FilesApp<EthernetClient, SdFs, FsFile, FILE_READ, FILE_WRITE>;
+using Library = files::FileLibrary<SdFs, FsFile, FILE_READ, FILE_WRITE>;
+using WebApp = api::Router<EthernetClient, Library, SdFs, FsFile, FILE_READ>;
 
 constexpr uint8_t kSdChipSelect = 4U;
 
@@ -67,7 +69,10 @@ void watch_network() {
 }
 
 void setup() {
-  WebApp::begin(sd_card, kSdChipSelect, entropy());
+  static Library library;
+  const bool mounted = library.begin(kSdChipSelect, sd_card, entropy());
+  static_cast<void>(mounted);
+  WebApp::attach(library);
   const bool known = mado::load_mac(EEPROM, kMacAddress, mac_address, entropy());
   static_cast<void>(known);
   start_network();

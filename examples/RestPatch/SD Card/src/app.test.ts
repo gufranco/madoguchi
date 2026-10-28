@@ -4,7 +4,8 @@ import { faker } from "@faker-js/faker";
 import { answer, fakeBoard, problem } from "@madoguchi/kit/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { patchOf, start } from "./app.ts";
+import { start } from "./app.ts";
+import { ItemPatch } from "./domain/item-patch.value.ts";
 
 const PAGE = readFileSync(resolve(import.meta.dirname, "../index.html"), "utf8");
 const STATUS = '[role="status"]';
@@ -24,7 +25,7 @@ describe("RestPatch page", () => {
     const fields = { name, state };
 
     // Act
-    const patch = patchOf(fields);
+    const patch = ItemPatch.from(fields);
 
     // Assert
     expect(patch).toEqual(expected);

@@ -1,30 +1,14 @@
-import { type Fetcher, readJson } from "@madoguchi/kit/api";
-import { isItem, itemLine } from "@madoguchi/kit/items";
-import {
-  type BoardHost,
-  boardFetcher,
-  inputOf,
-  onSubmit,
-  say,
-  startPage,
-} from "@madoguchi/kit/page";
+import { type BoardHost, boardFetcher, onSubmit, startPage } from "@madoguchi/kit/page";
 
-async function replaceItem(document: Document, fetcher: Fetcher): Promise<void> {
-  const id = inputOf(document, "item-id").valueAsNumber;
-  const body = {
-    name: inputOf(document, "item-name").value,
-    on: inputOf(document, "item-on").checked,
-  };
-  const item = await readJson(fetcher, "PUT", `/api/items/${id}`, isItem, {
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  document.getElementById("result")?.replaceChildren(itemLine(item));
-  say(document, `Replaced item ${item.id}.`);
-}
+import { createDomItemsView } from "./adapters/dom/items.view.dom.ts";
+import { createHttpItemGateway } from "./adapters/http/item.gateway.http.ts";
+import { createItemsService } from "./application/items.service.ts";
 
 export function start(host: BoardHost): void {
-  const fetcher = boardFetcher(host);
+  const items = createItemsService(
+    createHttpItemGateway(boardFetcher(host)),
+    createDomItemsView(host.document),
+  );
   startPage(host);
-  onSubmit(host.document, "form", () => replaceItem(host.document, fetcher));
+  onSubmit(host.document, "form", () => items.replaceRequested());
 }

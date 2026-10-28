@@ -1,21 +1,14 @@
-import { type Fetcher, sendCommand } from "@madoguchi/kit/api";
-import {
-  type BoardHost,
-  boardFetcher,
-  inputOf,
-  onSubmit,
-  say,
-  startPage,
-} from "@madoguchi/kit/page";
+import { type BoardHost, boardFetcher, onSubmit, startPage } from "@madoguchi/kit/page";
 
-async function deleteItem(document: Document, fetcher: Fetcher): Promise<void> {
-  const id = inputOf(document, "item-id").valueAsNumber;
-  await sendCommand(fetcher, "DELETE", `/api/items/${id}`);
-  say(document, `Deleted item ${id}.`);
-}
+import { createDomItemsView } from "./adapters/dom/items.view.dom.ts";
+import { createHttpItemGateway } from "./adapters/http/item.gateway.http.ts";
+import { createItemsService } from "./application/items.service.ts";
 
 export function start(host: BoardHost): void {
-  const fetcher = boardFetcher(host);
+  const items = createItemsService(
+    createHttpItemGateway(boardFetcher(host)),
+    createDomItemsView(host.document),
+  );
   startPage(host);
-  onSubmit(host.document, "form", () => deleteItem(host.document, fetcher));
+  onSubmit(host.document, "form", () => items.removeRequested());
 }

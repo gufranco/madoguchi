@@ -14,15 +14,17 @@
 #include <iterator>
 #include <string>
 
-#include "../../examples/RestApi/RestApp.h"
-#include "../../examples/RestApi/generated_api.h"
+#include "../../examples/RestApi/src/board.composition.h"
+#include "../../examples/RestApi/src/http/api.generated.h"
+#include "../../examples/RestApi/src/http/api.router.h"
 #include "../support/FakeSd.h"
 #include "../support/TestSecrets.h"
 #include "PosixClient.h"
 
 namespace {
 
-using HostApp = RestApp<PosixClient, test_secrets::TestSecrets, FakeSd, FILE_READ, FILE_WRITE>;
+using HostBoard = Board<FakeSd, test_secrets::TestSecrets, FILE_READ, FILE_WRITE>;
+using HostApp = api::Router<PosixClient, HostBoard>;
 
 struct HostLog : mado::DefaultPolicy {
   static void on_response(const mado::RequestLine& request, const mado::ResponseSummary& response) {
@@ -80,7 +82,9 @@ int main(int argc, char** argv) {
   if (argc > 3) {
     load_card(card, argv[3]);
   }
-  HostApp::begin(7U, card, 4U);
+  static HostBoard board;
+  static_cast<void>(begin_board(board, 7U, card, 4U));
+  HostApp::attach(board);
   HostServer server(&rest_api::kRoutes[0], &rest_api::kHeaderNames[0]);
   std::printf("listening on http://127.0.0.1:%u\n", port);
   std::fflush(stdout);

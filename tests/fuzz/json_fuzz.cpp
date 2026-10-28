@@ -3,7 +3,7 @@
 
 #include <cstdlib>
 
-#include "../../examples/RestApi/generated_api.h"
+#include "../../examples/RestApi/src/http/api.generated.h"
 #include "FuzzTarget.h"
 #include "mado/JsonReader.h"
 #include "mado/JsonStatus.h"

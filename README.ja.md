@@ -25,7 +25,7 @@
 
 ---
 
-Madoguchiは、W5x00またはENC28J60のシールドとSDカードを載せたUno R4 Minimaで動作し、ヒープを一切確保しません。C++のコードにはHTML、CSS、スクリプト、画像を一切含めません。すべてのページはカード上にあり、サンプルごとに独立したWebプロジェクトから作られます。TypeScriptとクラス不要のPico CSSで書かれ、Viteがカードのファイルとgzipのコピーにビルドします。ボードは1つのOpenAPIドキュメントから生成したREST APIに応答し、JWTによるログイン、JSONボディ、すべてのHTTPメソッドを扱います。CIは、プッシュとプルリクエストのたびに9個のサンプルすべてをビルドしてボードのフラッシュまたはRAMの上限を超えたビルドを失敗させ、ホストテスト1,182件、ツールテスト91件、ページテスト106件、ブラウザーテスト32件を実行し、すべてのカードをビルドし、パーサーをファズテストします。
+Madoguchiは、W5x00またはENC28J60のシールドとSDカードを載せたUno R4 Minimaで動作し、ヒープを一切確保しません。C++のコードにはHTML、CSS、スクリプト、画像を一切含めません。すべてのページはカード上にあり、サンプルごとに独立したWebプロジェクトから作られます。TypeScriptとクラス不要のPico CSSで書かれ、Viteがカードのファイルとgzipのコピーにビルドします。ボードは1つのOpenAPIドキュメントから生成したREST APIに応答し、JWTによるログイン、JSONボディ、すべてのHTTPメソッドを扱います。CIは、プッシュとプルリクエストのたびに9個のサンプルすべてをビルドしてボードのフラッシュまたはRAMの上限を超えたビルドを失敗させ、ホストテスト1,336件、ツールテスト91件、ページテスト127件、ブラウザーテスト32件を実行し、すべてのカードをビルドし、パーサーをファズテストします。
 
 名前の由来は、依頼を受け取って答えを返す「窓口」です。
 
@@ -157,17 +157,19 @@ Madoguchiが対応するボードは、Renesas RA4M1を載せたArduino Uno R4 M
 
 | サンプル | 内容 | フラッシュ（262,144中） | 使用RAM（32,768中） |
 |:--------|:------|------:|------:|
-| [`RestGet`](examples/RestGet/RestGet.ino) | 項目一覧と項目1件の`GET` | 74,072 | 5,920 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | JSONによる新しい項目の`POST` | 76,340 | 5,920 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | 項目を置き換える`PUT` | 76,540 | 5,920 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 項目の一部のフィールドを変更する`PATCH` | 76,508 | 5,920 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | IDによる項目の`DELETE` | 73,316 | 5,920 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | ログインと保護されたルート1つ | 86,920 | 6,144 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD上のファイル。一覧、ダウンロード、範囲指定、進捗付きアップロード、削除 | 94,040 | 6,936 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | 完全なAPI、そのサイト、Swagger UI、リクエストログ | 105,644 | 6,632 |
-| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 0x00と0xFFで消去して検証し、FAT16、FAT32、exFATでフォーマット。JSONのみ | 71,440 | 9,936 |
+| [`RestGet`](examples/RestGet/RestGet.ino) | 項目一覧と項目1件の`GET` | 74,764 | 5,904 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | JSONによる新しい項目の`POST` | 77,032 | 5,904 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | 項目を置き換える`PUT` | 77,656 | 5,904 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 項目の一部のフィールドを変更する`PATCH` | 77,692 | 5,904 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | IDによる項目の`DELETE` | 73,856 | 5,904 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | ログインと保護されたルート1つ | 87,496 | 6,184 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD上のファイル。一覧、ダウンロード、範囲指定、進捗付きアップロード、削除 | 94,472 | 6,944 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | 完全なAPI、そのサイト、Swagger UI、リクエストログ | 107,364 | 6,648 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 0x00と0xFFで消去して検証し、FAT16、FAT32、exFATでフォーマット。JSONのみ | 71,852 | 9,936 |
 
 RestFormat以外のどのサンプルも`/api/openapi.json`にカードから応答し、`/docs/`でSwagger UIを配信します。CIは、ボードの上限を超えたビルドを失敗させます。
+
+各サンプルはそれ自体が1つのプロジェクトで、設計を説明するREADMEを持ちます。コードはサンプルの`src`フォルダーにあり、境界づけられたコンテキストごと、次にレイヤーごとにまとめています。`domain`はルールを持ち、Arduinoのヘッダーを一切インクルードしません。`application`はユースケースとそれが必要とするポートを持ち、`adapters`はHTTPコントローラーとストレージを持ちます。`.ino`ファイルはアダプターを組み立てて結び付けるだけです。各サンプルの`tests`フォルダーにはホストテストがあり、`SD Card`のページも同じ分け方に従います。
 
 ## SDカードのWebプロジェクト
 
@@ -198,7 +200,7 @@ pnpm run build
 graph LR
     subgraph Build time on a computer
         Spec[openapi.json] --> Gen[tools/madogen]
-        Gen --> Header[generated_api.h]
+        Gen --> Header[src/http/api.generated.h]
         Pages[SD Card web project] --> Vite[Vite and the kit]
         Spec --> Vite
         Vite --> Card[Card files and gz copies]
@@ -520,7 +522,7 @@ curl -s http://192.168.1.177/api/card/format
 
 ### APIコードの生成
 
-各RESTスケッチは`openapi.json`を持ちます。[`tools/madogen`](tools/madogen/cli.py)はそれを`generated_api.h`に変換します。このファイルはコミットされるため、Arduino IDEはPythonなしでスケッチをビルドできます。ジェネレーターはPythonの標準ライブラリだけを使います。
+各RESTスケッチは`openapi.json`を持ちます。[`tools/madogen`](tools/madogen/cli.py)はそれを`src/http/api.generated.h`に変換します。このファイルはコミットされるため、Arduino IDEはPythonなしでスケッチをビルドできます。ジェネレーターはPythonの標準ライブラリだけを使います。
 
 ```sh
 python3 -m tools.madogen generate examples/RestApi
@@ -536,7 +538,7 @@ python3 -m tools.madogen check examples/RestApi
 - `Content-Type`と長さを確認してボディを読み、最初に欠けている必須プロパティを`mado::Problem`で示す`read_<schema>_body()`と、IDによる`GET`ごとの`<operation>_url()`
 - 仕様とそれ以外のすべてのパスをカードから配信し、カードがないときは`503`を返す`send_card()`
 
-`check`は、`generated_api.h`がソースと一致しなくなった場合、または`arduino_secrets.h`に本物の鍵が入っている場合に失敗します。CIは9つのサンプルすべてで実行します。
+`check`は、`src/http/api.generated.h`がソースと一致しなくなった場合、または`arduino_secrets.h`に本物の鍵が入っている場合に失敗します。CIは9つのサンプルすべてで実行します。
 
 ジェネレーターはOpenAPI 3.1のサブセットを受け付け、範囲外のものはJSONポインターで示します。
 
@@ -576,13 +578,13 @@ python3 -m tools.madogen secrets examples/RestApi --user admin
 
 | スイート | コマンド | 対象 |
 |:------|:--------|:-------|
-| ライブラリとサンプル | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,182件。RFC 9112適合表、解析、ルーティング、レスポンス、カードのファイル、範囲指定、ネットワーク補助関数、SDログ、暗号、トークン、サンプルのアプリケーションコード、各ファズコーパスの再生 |
+| ライブラリとサンプル | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,336件。RFC 9112適合表、解析、ルーティング、レスポンス、カードのファイル、範囲指定、ネットワーク補助関数、SDログ、暗号、トークン、サンプルのアプリケーションコード、各ファズコーパスの再生 |
 | カバレッジ | `gcovr build --root . --filter src/ --merge-lines --txt` | `src/`の行と関数のカバレッジ。CIでは95パーセントを下限とします |
 | ジェネレーターとゲート | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen`、アサーション密度ゲート、サイズゲート、スループットツールの91件 |
-| ページ | `pnpm run check && pnpm run test && pnpm run build` | Biome、TypeScript、html-validate、カバレッジ95パーセントのゲート付きVitestテスト106件、すべてのカードのビルド |
+| ページ | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | 依存関係の監査、Biome、TypeScript、html-validate、カバレッジ95パーセントのゲート付きVitestテスト127件、すべてのカードのビルド |
 | ブラウザー | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | Playwrightテスト32件。すべてのページとドキュメントページを320 pxとデスクトップ幅で検証 |
 | スループット | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | ボードに対するダウンロードとアップロードの速度をJSONで表示 |
-| 生成コード | `python3 -m tools.madogen check examples/Rest*` | `generated_api.h`がソースと一致し、本物の鍵がコミットされていないこと |
+| 生成コード | `python3 -m tools.madogen check examples/Rest*` | `src/http/api.generated.h`がソースと一致し、本物の鍵がコミットされていないこと |
 | ファズテスト | `cmake -S tests -B fuzz -DMADO_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build fuzz && fuzz/mado_fuzz_request tests/fuzz/corpus/request` | AddressSanitizerとUBSanを有効にしたlibFuzzerで、サーバー、RestApiとRestFilesのアプリ、JSONリーダー、テキストデコーダーを検査 |
 | サイズ上限 | `python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima examples/RestApi` | ボードの上限に対するフラッシュとRAM、コンパイラー警告ゼロ |
 

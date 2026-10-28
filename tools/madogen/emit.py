@@ -58,8 +58,11 @@ def method_enum(method: str) -> str:
 def render_route_ids(operations: tuple[Operation, ...], card: bool) -> str:
     names = [constant(operation.operation_id) for operation in operations]
     extra = ["kOpenApiDocument", "kCardFile"] if card else []
-    body = "".join(f"  {name},\n" for name in [*names, *extra])
-    return f"enum RouteId : uint8_t {{\n{body}}};\n\n"
+    body = "".join(
+        f"constexpr uint8_t {name} = {index}U;\n"
+        for index, name in enumerate([*names, *extra])
+    )
+    return f"{body}\n"
 
 
 def render_routes(operations: tuple[Operation, ...], card: bool) -> str:
@@ -149,39 +152,44 @@ def last_route(operations: tuple[Operation, ...], card: bool) -> str:
     return "kCardFile" if card else constant(operations[-1].operation_id)
 
 
+def any_route(names: list[str]) -> str:
+    return " || ".join(f"(route == {name})" for name in names)
+
+
 def render_token_routes(operations: tuple[Operation, ...], last: str) -> str:
     secured = [constant(op.operation_id) for op in operations if op.secured]
+    if not secured:
+        return ""
     return (
         "inline bool route_needs_token(const uint8_t route) {\n"
         f"  const bool known = mado::check(route <= {last});\n"
-        "  if (!known) {\n    return true;\n  }\n"
-        "  switch (route) {\n"
-        f"{case_block(secured, 'true')}"
-        "    default:\n      return false;\n  }\n}\n\n"
+        f"  return (!known) || {any_route(secured)};\n}}\n\n"
     )
 
 
 def render_path_ids(operations: tuple[Operation, ...], last: str) -> str:
     prefixes = sorted({op.id_prefix for op in operations if op.id_prefix})
+    if not prefixes:
+        return ""
     blocks = "".join(
-        case_block(
-            [constant(op.operation_id) for op in operations if op.id_prefix == prefix],
-            f'mado::parse_path_id(path, PSTR("{prefix}"), id)',
-        )
+        f"  if ({any_route([constant(op.operation_id) for op in operations if op.id_prefix == prefix])}) {{\n"
+        f'    return mado::parse_path_id(path, PSTR("{prefix}"), resource_id);\n  }}\n'
         for prefix in prefixes
     )
     return (
-        "inline bool route_path_id(const char* const path, const uint8_t route, uint8_t& id) {\n"
-        "  id = 0U;\n"
+        "inline bool route_path_id(const char* const path, const uint8_t route,\n"
+        "                          uint8_t& resource_id) {\n"
+        "  resource_id = 0U;\n"
         f"  const bool valid = mado::check(path != nullptr) && mado::check(route <= {last});\n"
         "  if (!valid) {\n    return false;\n  }\n"
-        "  switch (route) {\n"
         f"{blocks}"
-        "    default:\n      return false;\n  }\n}\n\n"
+        "  return false;\n}\n\n"
     )
 
 
 def render_locations(operations: tuple[Operation, ...]) -> str:
+    if not any(op.method in ("post", "put") for op in operations):
+        return ""
     return "".join(
         f"inline const __FlashStringHelper* {snake(op.operation_id)}_url() {{\n"
         f'  return F("{cpp_string(op.id_prefix)}");\n}}\n\n'
@@ -238,12 +246,23 @@ def field_reader_head(schema: Schema, field: Field) -> str:
         f"mado::JsonReader<SourceT>& reader, {schema.name}& value,\n"
         "                                    uint8_t& present) {\n"
         f"  const bool fresh = mado::check((present & {bit}) == 0U);\n"
+        "  const bool sound = "
+        f"mado::check((present & static_cast<uint8_t>(~k{schema.name}Writable)) == 0U);\n"
         f"  present = static_cast<uint8_t>(present | {bit});\n"
-        "  if (!fresh) {\n    return mado::JsonStatus::kUnsupported;\n  }\n"
+        "  if ((!fresh) || (!sound)) {\n    return mado::JsonStatus::kUnsupported;\n  }\n"
     )
 
 
 def field_reader_body(field: Field) -> str:
+    if field.kind is Kind.STRING and field.minimum > 0:
+        return (
+            "  const mado::JsonStatus status =\n"
+            f"      reader.read_string(&value.{field.name}[0], sizeof(value.{field.name}));\n"
+            "  const bool long_enough = mado::check(\n"
+            f"      strnlen(&value.{field.name}[0], sizeof(value.{field.name})) >= {field.minimum}U);\n"
+            "  const bool too_short = (status == mado::JsonStatus::kOk) && (!long_enough);\n"
+            "  return too_short ? mado::JsonStatus::kTooShort : status;\n"
+        )
     if field.kind is Kind.STRING:
         return f"  return reader.read_string(&value.{field.name}[0], sizeof(value.{field.name}));\n"
     if field.kind is Kind.BOOLEAN:
@@ -327,8 +346,10 @@ def writer_checks(schema: Schema) -> str:
         for field in schema.fields
         if field.kind is Kind.INTEGER and range_test(field, "v") != "true"
     ]
-    joined = " && ".join(tests) if tests else "true"
-    return f"  const bool sound = mado::check({joined});\n"
+    if not tests:
+        return "  const bool sound = true;\n"
+    joined = " &&\n                     ".join(f"mado::check({test})" for test in tests)
+    return f"  const bool sound = {joined};\n"
 
 
 def render_writer(schema: Schema) -> str:
@@ -351,7 +372,7 @@ def render_missing(schema: Schema) -> str:
         field for field in schema.fields if field.required and not field.read_only
     ]
     branches = "".join(
-        f"  if ((present & k{schema.name}{pascal(field.name)}) == 0U) {{\n"
+        f"  if (!mado::check((present & k{schema.name}{pascal(field.name)}) != 0U)) {{\n"
         "    return mado::Problem{mado::http::kUnprocessableContent, "
         f'F("missing required property: {field.name}")}};\n  }}\n'
         for field in required
@@ -376,11 +397,11 @@ def render_body_reader(schema: Schema) -> str:
         "                                const uint32_t max_body) {\n"
         "  present = 0U;\n"
         "  const mado::Problem framing = mado::json_body_problem(exchange, max_body);\n"
-        "  if (framing.status != mado::http::kNoResponse) {\n    return framing;\n  }\n"
+        "  if (!mado::check(framing.status == mado::http::kNoResponse)) {\n    return framing;\n  }\n"
         "  mado::BodySource<ExchangeT> source(exchange);\n"
         "  mado::JsonReader<mado::BodySource<ExchangeT>> reader(source);\n"
         f"  const mado::JsonStatus status = read_{prefix}(reader, value, present);\n"
-        "  if (status != mado::JsonStatus::kOk) {\n"
+        "  if (!mado::check(status == mado::JsonStatus::kOk)) {\n"
         "    return mado::json_problem(status);\n  }\n"
         f"  return {prefix}_missing(present);\n}}\n\n"
     )
@@ -422,9 +443,11 @@ def render_send_card() -> str:
         "                      mado::check(route == kCardFile);\n"
         "  if (!served) {\n    return exchange.send_empty(mado::http::kNotFound);\n  }\n"
         "  if (card == nullptr) {\n"
-        "    return mado::send_problem(\n"
-        "        exchange, mado::Problem{mado::http::kServiceUnavailable,\n"
-        '                                F("the SD card is not available")});\n  }\n'
+        "    const mado::Problem missing{\n"
+        "        mado::http::kServiceUnavailable,\n"
+        '        F("the SD card is not available"),\n'
+        "    };\n"
+        "    return mado::send_problem(exchange, missing);\n  }\n"
         "  if (route == kOpenApiDocument) {\n"
         "    return mado::serve_card_path<kReadMode>(exchange, *card, &kOpenApiCardPath[0]);\n"
         "  }\n"

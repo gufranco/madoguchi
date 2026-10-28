@@ -25,7 +25,7 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 
 ---
 
-Madoguchi runs on the Uno R4 Minima with a W5x00 or ENC28J60 shield and an SD card, and allocates nothing on the heap. The C++ code holds no HTML, CSS, script or image: every page lives on the card and comes from a separate web project per example, written in TypeScript with classless Pico CSS, built by Vite into the card's files with gzip copies. The board answers the REST API generated from one OpenAPI document, with JWT login, JSON bodies and every HTTP verb. CI builds all 9 examples, fails any build over the board's flash or RAM budget, runs 1,182 host tests, 91 tool tests, 106 page tests and 32 browser tests, builds every card, and fuzzes the parsers on every push and pull request.
+Madoguchi runs on the Uno R4 Minima with a W5x00 or ENC28J60 shield and an SD card, and allocates nothing on the heap. The C++ code holds no HTML, CSS, script or image: every page lives on the card and comes from a separate web project per example, written in TypeScript with classless Pico CSS, built by Vite into the card's files with gzip copies. The board answers the REST API generated from one OpenAPI document, with JWT login, JSON bodies and every HTTP verb. CI builds all 9 examples, fails any build over the board's flash or RAM budget, runs 1,336 host tests, 91 tool tests, 127 page tests and 32 browser tests, builds every card, and fuzzes the parsers on every push and pull request.
 
 The name is 窓口, Japanese for the service counter where you hand over a request and get an answer back.
 
@@ -157,17 +157,19 @@ Sizes in bytes on the Uno R4 Minima, built with arduino-cli 1.5.1, arduino:renes
 
 | Example | Shows | Flash, of 262,144 | RAM used, of 32,768 |
 |:--------|:------|------:|------:|
-| [`RestGet`](examples/RestGet/RestGet.ino) | `GET` of the item list and of one item | 74,072 | 5,920 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | `POST` of a new item as JSON | 76,340 | 5,920 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | `PUT` replacing an item | 76,540 | 5,920 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | `PATCH` changing some fields of an item | 76,508 | 5,920 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | `DELETE` of an item by id | 73,316 | 5,920 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | login and one protected route | 86,920 | 6,144 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | files on SD: list, download, ranges, upload with progress, delete | 94,040 | 6,936 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | the full API, its site, Swagger UI and the request log | 105,644 | 6,632 |
-| [`RestFormat`](examples/RestFormat/RestFormat.ino) | wipe with 0x00 and 0xFF, verify, then format as FAT16, FAT32 or exFAT; JSON only | 71,440 | 9,936 |
+| [`RestGet`](examples/RestGet/RestGet.ino) | `GET` of the item list and of one item | 74,764 | 5,904 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | `POST` of a new item as JSON | 77,032 | 5,904 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | `PUT` replacing an item | 77,656 | 5,904 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | `PATCH` changing some fields of an item | 77,692 | 5,904 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | `DELETE` of an item by id | 73,856 | 5,904 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | login and one protected route | 87,496 | 6,184 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | files on SD: list, download, ranges, upload with progress, delete | 94,472 | 6,944 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | the full API, its site, Swagger UI and the request log | 107,364 | 6,648 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | wipe with 0x00 and 0xFF, verify, then format as FAT16, FAT32 or exFAT; JSON only | 71,852 | 9,936 |
 
 Every example but RestFormat answers `/api/openapi.json` from the card and serves Swagger UI at `/docs/`. CI fails a build that crosses the board's budget.
+
+Each example is a project of its own, with a README that explains its design. Code lives in the example's `src` folder, grouped by bounded context and then by layer: `domain` holds the rules and includes no Arduino header, `application` holds the use cases and the ports they need, and `adapters` holds the HTTP controllers and the storage. The `.ino` file only builds the adapters and wires them together. Each example's `tests` folder holds its host tests, and its `SD Card` pages follow the same split.
 
 ## The SD card web projects
 
@@ -198,7 +200,7 @@ The shared code lives in [`web/kit`](web/kit): the CDN pins, the theme toggle, t
 graph LR
     subgraph Build time on a computer
         Spec[openapi.json] --> Gen[tools/madogen]
-        Gen --> Header[generated_api.h]
+        Gen --> Header[src/http/api.generated.h]
         Pages[SD Card web project] --> Vite[Vite and the kit]
         Spec --> Vite
         Vite --> Card[Card files and gz copies]
@@ -520,7 +522,7 @@ curl -s http://192.168.1.177/api/card/format
 
 ### Generating the API code
 
-Each REST sketch keeps an `openapi.json`. [`tools/madogen`](tools/madogen/cli.py) turns it into `generated_api.h`, which is committed, so the Arduino IDE builds the sketch with no Python installed. The generator uses only the Python standard library.
+Each REST sketch keeps an `openapi.json`. [`tools/madogen`](tools/madogen/cli.py) turns it into `src/http/api.generated.h`, which is committed, so the Arduino IDE builds the sketch with no Python installed. The generator uses only the Python standard library.
 
 ```sh
 python3 -m tools.madogen generate examples/RestApi
@@ -536,7 +538,7 @@ python3 -m tools.madogen check examples/RestApi
 - `read_<schema>_body()`, which checks `Content-Type` and length, reads the body and names the first missing required property in a `mado::Problem`, and `<operation>_url()` for each `GET` by id;
 - `send_card()`, which serves the spec and every other path from the card, and answers `503` when there is no card.
 
-`check` fails when `generated_api.h` no longer matches its sources, or when `arduino_secrets.h` holds a real key. CI runs it on all nine examples.
+`check` fails when `src/http/api.generated.h` no longer matches its sources, or when `arduino_secrets.h` holds a real key. CI runs it on all nine examples.
 
 The generator accepts a subset of OpenAPI 3.1 and names the JSON pointer of anything outside it:
 
@@ -576,13 +578,13 @@ Host tests use CMake and googletest, with a small Arduino shim, a fake client, a
 
 | Suite | Command | Covers |
 |:------|:--------|:-------|
-| Library and examples | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,182 tests: an RFC 9112 conformance table, parsing, routing, responses, card files, ranges, the network helpers, the SD log, crypto, tokens, the examples' application code, and a replay of each fuzz corpus |
+| Library and examples | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,336 tests: an RFC 9112 conformance table, parsing, routing, responses, card files, ranges, the network helpers, the SD log, crypto, tokens, the examples' application code, and a replay of each fuzz corpus |
 | Coverage | `gcovr build --root . --filter src/ --merge-lines --txt` | line and function coverage of `src/`, gated at 95 percent in CI |
 | Generator and gates | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | 91 tests for `madogen`, the assertion density gate, the size gate and the throughput tool |
-| Pages | `pnpm run check && pnpm run test && pnpm run build` | Biome, TypeScript, html-validate, 106 Vitest tests with a 95 percent coverage gate, and every card build |
+| Pages | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | the dependency audit, Biome, TypeScript, html-validate, 127 Vitest tests with a 95 percent coverage gate, and every card build |
 | Browser | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | 32 Playwright tests: every page and docs page at 320 px and desktop width |
 | Throughput | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | download and upload speed against a board, printed as JSON |
-| Generated code | `python3 -m tools.madogen check examples/Rest*` | `generated_api.h` matches its sources and no real key is committed |
+| Generated code | `python3 -m tools.madogen check examples/Rest*` | `src/http/api.generated.h` matches its sources and no real key is committed |
 | Fuzzing | `cmake -S tests -B fuzz -DMADO_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build fuzz && fuzz/mado_fuzz_request tests/fuzz/corpus/request` | libFuzzer with AddressSanitizer and UBSan on the server, the RestApi and RestFiles apps, the JSON reader and the text decoders |
 | Size budget | `python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima examples/RestApi` | flash and RAM against the board's budget, with zero compiler warnings |
 

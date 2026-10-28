@@ -12,13 +12,16 @@
 #include <mado/begin_network.h>
 #include <mado/load_mac.h>
 
-#include "RestApp.h"
 #include "arduino_secrets.h"
-#include "generated_api.h"
+#include "src/board.composition.h"
+#include "src/http/api.generated.h"
+#include "src/http/api.router.h"
+#include "src/identity/adapters/eeprom_session.counter.h"
 
 #include <SdFat.h>
 
-using WebApp = RestApp<EthernetClient, secrets::Provisioned, SdFs, FILE_READ, FILE_WRITE>;
+using WebBoard = Board<SdFs, secrets::Provisioned, FILE_READ, FILE_WRITE>;
+using WebApp = api::Router<EthernetClient, WebBoard>;
 
 struct LoggingPolicy {
   static constexpr bool kTrustedHostsOnly = false;
@@ -28,31 +31,23 @@ struct LoggingPolicy {
   }
 };
 
-constexpr int kSessionAddress = 0;
-constexpr uint32_t kLastSession = 0x7FFFFFFFU;
 constexpr uint16_t kMacAddress = 8U;
 constexpr uint32_t kDhcpTimeoutMs = 10000UL;
 constexpr uint8_t kEntropyPins = 6U;
 constexpr uint8_t kSdChipSelect = 4U;
 
 SdFs sd_card;
+WebBoard board;
+identity::EepromSessionCounter<decltype(EEPROM)> sessions(EEPROM);
+const char kHostName[] PROGMEM = "madoguchi";
 
 uint8_t mac_address[mado::kMacSize] = {};
 EthernetServer ethernet_server(80);
 EthernetUDP mdns_socket;
-mado::MdnsResponder<EthernetUDP, IPAddress> mdns(&kRestHostName[0]);
+mado::MdnsResponder<EthernetUDP, IPAddress> mdns(&kHostName[0]);
 mado::NetworkWatch network_watch;
 mado::Server<EthernetClient, WebApp, rest_api::Limits, LoggingPolicy> web(
     &rest_api::kRoutes[0], &rest_api::kHeaderNames[0]);
-
-uint32_t next_session() {
-  uint32_t stored = 0U;
-  static_cast<void>(EEPROM.get(kSessionAddress, stored));
-  const bool fresh = (stored == 0U) || (stored >= kLastSession);
-  const uint32_t session = fresh ? 1U : (stored + 1U);
-  static_cast<void>(EEPROM.put(kSessionAddress, session));
-  return session;
-}
 
 uint32_t entropy() {
   uint32_t mixed = micros();
@@ -85,14 +80,16 @@ void watch_network() {
 }
 
 void setup() {
-  WebApp::begin(next_session(), sd_card, kSdChipSelect);
+  const bool mounted = begin_board(board, sessions.advance(), sd_card, kSdChipSelect);
+  static_cast<void>(mounted);
+  WebApp::attach(board);
   const bool known = mado::load_mac(EEPROM, kMacAddress, mac_address, entropy());
   static_cast<void>(known);
   start_network();
 }
 
 void loop() {
-  WebApp::tick(millis());
+  board.uptime.advance(millis());
   watch_network();
   const bool answered = mdns.poll(mdns_socket, Ethernet.localIP());
   static_cast<void>(answered);

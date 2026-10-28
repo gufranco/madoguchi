@@ -121,7 +121,10 @@ def string_limits(node: Json, pointer: str) -> tuple[int, int, int]:
     length = as_int(child(node, "maxLength", pointer), f"{pointer}/maxLength")
     if not 1 <= length <= MAX_STRING_LENGTH:
         raise SpecError(f"{pointer}/maxLength", f"must be 1 to {MAX_STRING_LENGTH}")
-    return length, 0, 0
+    shortest = as_int(node.get("minLength", 0), f"{pointer}/minLength")
+    if not 0 <= shortest <= length:
+        raise SpecError(f"{pointer}/minLength", f"must be 0 to {length}")
+    return length, shortest, 0
 
 
 def integer_limits(node: Json, pointer: str) -> tuple[int, int, int]:

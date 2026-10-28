@@ -24,7 +24,7 @@ from .provision import (
 from .spec import Api, Json, SpecError, parse_api
 
 SPEC_FILE = "openapi.json"
-OUTPUT_FILE = "generated_api.h"
+OUTPUT_FILE = Path("src") / "http" / "api.generated.h"
 SECRETS_FILE = "arduino_secrets.h"
 
 
@@ -43,7 +43,9 @@ def render_sketch(folder: Path) -> str:
 
 def generate(folders: list[Path]) -> int:
     for folder in folders:
-        (folder / OUTPUT_FILE).write_text(render_sketch(folder), encoding="utf-8")
+        output = folder / OUTPUT_FILE
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(render_sketch(folder), encoding="utf-8")
         secured = any(operation.secured for operation in load_api(folder)[1].operations)
         secrets_path = folder / SECRETS_FILE
         if secured and not secrets_path.exists():

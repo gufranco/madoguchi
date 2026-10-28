@@ -63,7 +63,7 @@ def test_generate_writes_the_header_and_a_placeholder(tmp_path: Path) -> None:
 
     # Assert
     assert code == 0
-    header = (folder / "generated_api.h").read_text(encoding="utf-8")
+    header = (folder / "src" / "http" / "api.generated.h").read_text(encoding="utf-8")
     assert "kReset" in header
     assert "namespace ping {" in header
     assert is_placeholder((folder / "arduino_secrets.h").read_text(encoding="utf-8"))
@@ -126,7 +126,7 @@ def test_check_names_a_stale_header(
 
     # Assert
     assert code == 1
-    assert "generated_api.h is stale" in capsys.readouterr().out
+    assert "src/http/api.generated.h is stale" in capsys.readouterr().out
 
 
 def test_check_refuses_provisioned_secrets(
@@ -157,7 +157,7 @@ def test_check_reports_a_missing_header(
 
     # Assert
     assert code == 1
-    assert "generated_api.h is missing" in capsys.readouterr().out
+    assert "src/http/api.generated.h is missing" in capsys.readouterr().out
 
 
 def test_secrets_reads_the_password_from_stdin(

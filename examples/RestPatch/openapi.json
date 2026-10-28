@@ -25,6 +25,7 @@
           },
           "name": {
             "type": "string",
+            "minLength": 1,
             "maxLength": 16
           },
           "on": {
@@ -39,6 +40,7 @@
         "properties": {
           "name": {
             "type": "string",
+            "minLength": 1,
             "maxLength": 16
           },
           "on": {

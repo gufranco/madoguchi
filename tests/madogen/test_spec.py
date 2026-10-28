@@ -109,6 +109,31 @@ def test_reads_schema_fields_with_their_limits() -> None:
     assert [field.required for field in fields] == [False, True, True, False]
 
 
+def test_reads_a_minimum_string_length() -> None:
+    # Arrange
+    spec = document()
+    spec["components"]["schemas"]["Item"]["properties"]["name"]["minLength"] = 1
+
+    # Act
+    api = parse_api(spec)
+
+    # Assert
+    assert api.schemas[0].fields[1].minimum == 1
+
+
+@pytest.mark.parametrize("length", [-1, 17, True])
+def test_rejects_a_minimum_length_outside_the_maximum(length: object) -> None:
+    # Arrange
+    spec = document()
+    spec["components"]["schemas"]["Item"]["properties"]["name"]["minLength"] = length
+
+    # Act
+    error = error_for(spec)
+
+    # Assert
+    assert error.pointer == "/components/schemas/Item/properties/name/minLength"
+
+
 def test_applies_document_level_security() -> None:
     # Arrange
     spec = document()

@@ -7,7 +7,6 @@
     "./auth": "./src/auth.ts",
     "./cdn": "./src/cdn.ts",
     "./docs": "./src/docs.ts",
-    "./items": "./src/items.ts",
     "./names": "./src/names.ts",
     "./page": "./src/page.ts",
     "./testing": "./src/testing.ts",

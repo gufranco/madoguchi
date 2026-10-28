@@ -46,7 +46,7 @@
         "required": ["name", "value", "on"],
         "properties": {
           "id": { "type": "integer", "minimum": 1, "maximum": 254, "readOnly": true },
-          "name": { "type": "string", "maxLength": 16 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 16 },
           "value": { "type": "integer", "minimum": -100000, "maximum": 100000 },
           "on": { "type": "boolean" }
         }
@@ -57,7 +57,7 @@
         "x-mado-writer": true,
         "minProperties": 1,
         "properties": {
-          "name": { "type": "string", "maxLength": 16 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 16 },
           "value": { "type": "integer", "minimum": -100000, "maximum": 100000 },
           "on": { "type": "boolean" }
         }

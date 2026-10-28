@@ -18,7 +18,8 @@ class FakeSectorCard {
   FakeSectorCard(uint32_t sectors, uint8_t type) : sectors_(sectors), type_(type) {
   }
 
-  uint32_t sectorCount() const {
+  uint32_t sectorCount() {
+    ++count_queries_;
     return sectors_;
   }
 
@@ -95,6 +96,10 @@ class FakeSectorCard {
     return writes_;
   }
 
+  size_t count_queries() const {
+    return count_queries_;
+  }
+
  private:
   uint32_t sectors_;
   uint8_t type_;
@@ -105,6 +110,7 @@ class FakeSectorCard {
   uint8_t stuck_value_ = 0U;
   size_t reads_ = 0U;
   size_t writes_ = 0U;
+  size_t count_queries_ = 0U;
   std::map<uint32_t, Sector> sectors_written_;
 };
 

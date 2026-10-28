@@ -68,10 +68,12 @@ jobs:
           --exclude-unreachable-branches --fail-under-line 95 --fail-under-function 95 --txt
 
       - name: Format
-        run: >-
-          clang-format --dry-run --Werror src/*.h src/mado/*.h tests/*.cpp tests/examples/*.cpp
-          tests/fuzz/*.cpp tests/fuzz/*.h tests/support/* tests/shim/*.h tests/host_server/*
-          examples/*/*App.h examples/*/*Job.h examples/RestApi/RestStore.h
+        run: |
+          mapfile -t example_sources < <(find examples/*/src examples/*/tests \
+            \( -name '*.h' -not -name '*.generated.h' \) -o -name '*.cpp')
+          clang-format --dry-run --Werror src/*.h src/mado/*.h tests/*.cpp tests/fuzz/*.cpp \
+            tests/fuzz/*.h tests/support/* tests/shim/*.h tests/host_server/* \
+            "${example_sources[@]}"
 
       - name: Format examples
         run: |
@@ -80,7 +82,7 @@ jobs:
           done
 
       - name: clang-tidy
-        run: clang-tidy -p build tests/*.cpp tests/examples/*.cpp tests/fuzz/*.cpp
+        run: clang-tidy -p build tests/*.cpp examples/*/tests/*.cpp tests/fuzz/*.cpp
 
       - name: cppcheck
         run: >-
@@ -89,7 +91,11 @@ jobs:
           --check-level=exhaustive -i build/_deps --file-filter='*/tests/*' --quiet
 
       - name: Assertion density
-        run: python3 tools/assertion_density.py
+        run: |
+          python3 tools/assertion_density.py
+          for example in examples/*/src; do
+            python3 tools/assertion_density.py --root "${example}"
+          done
 
       - name: Tools
         run: |
@@ -123,6 +129,9 @@ jobs:
 
       - name: Install the workspace
         run: pnpm install --frozen-lockfile
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level=low
 
       - name: Lint, format, type and HTML checks
         run: pnpm run check

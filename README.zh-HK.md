@@ -25,7 +25,7 @@
 
 ---
 
-Madoguchi 在裝有 W5x00 或 ENC28J60 擴充板及 SD 卡的 Uno R4 Minima 上運作，而且完全不在堆積上配置記憶體。C++ 程式碼不含任何 HTML、CSS、腳本或圖片：所有頁面都在卡上，由每個範例各自獨立的網頁項目產生。這些項目以 TypeScript 及無類別的 Pico CSS 編寫，由 Vite 建置為記憶卡上的檔案及 gzip 副本。開發板會回應由單一 OpenAPI 文件產生的 REST API，支援 JWT 登入、JSON 請求主體及所有 HTTP 方法。每次推送及 pull request 時，CI 都會建置全部 9 個範例，任何超出開發板快閃記憶體或 RAM 預算的建置都會失敗；同時執行 1,182 個主機測試、91 個工具測試、106 個頁面測試及 32 個瀏覽器測試，建置每張卡，並對剖析器進行模糊測試。
+Madoguchi 在裝有 W5x00 或 ENC28J60 擴充板及 SD 卡的 Uno R4 Minima 上運作，而且完全不在堆積上配置記憶體。C++ 程式碼不含任何 HTML、CSS、腳本或圖片：所有頁面都在卡上，由每個範例各自獨立的網頁項目產生。這些項目以 TypeScript 及無類別的 Pico CSS 編寫，由 Vite 建置為記憶卡上的檔案及 gzip 副本。開發板會回應由單一 OpenAPI 文件產生的 REST API，支援 JWT 登入、JSON 請求主體及所有 HTTP 方法。每次推送及 pull request 時，CI 都會建置全部 9 個範例，任何超出開發板快閃記憶體或 RAM 預算的建置都會失敗；同時執行 1,336 個主機測試、91 個工具測試、127 個頁面測試及 32 個瀏覽器測試，建置每張卡，並對剖析器進行模糊測試。
 
 名稱來自日語的「窓口」，即遞交請求、取回答覆的服務窗口。
 
@@ -157,17 +157,19 @@ Madoguchi 只支援一塊開發板：搭載 Renesas RA4M1 的 Arduino Uno R4 Min
 
 | 範例 | 示範內容 | 快閃記憶體，共 262,144 | 已用 RAM，共 32,768 |
 |:--------|:------|------:|------:|
-| [`RestGet`](examples/RestGet/RestGet.ino) | 項目清單及單一項目的 `GET` | 74,072 | 5,920 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | 以 JSON 新增項目的 `POST` | 76,340 | 5,920 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | 取代項目的 `PUT` | 76,540 | 5,920 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 修改項目部分欄位的 `PATCH` | 76,508 | 5,920 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | 按 id 刪除項目的 `DELETE` | 73,316 | 5,920 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | 登入及一個受保護的路由 | 86,920 | 6,144 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD 上的檔案：列出、下載、範圍請求、附進度的上載、刪除 | 94,040 | 6,936 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | 完整的 API、其網站、Swagger UI 及請求日誌 | 105,644 | 6,632 |
-| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 以 0x00 及 0xFF 清除並驗證，再格式化為 FAT16、FAT32 或 exFAT；只有 JSON | 71,440 | 9,936 |
+| [`RestGet`](examples/RestGet/RestGet.ino) | 項目清單及單一項目的 `GET` | 74,764 | 5,904 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | 以 JSON 新增項目的 `POST` | 77,032 | 5,904 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | 取代項目的 `PUT` | 77,656 | 5,904 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 修改項目部分欄位的 `PATCH` | 77,692 | 5,904 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | 按 id 刪除項目的 `DELETE` | 73,856 | 5,904 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | 登入及一個受保護的路由 | 87,496 | 6,184 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD 上的檔案：列出、下載、範圍請求、附進度的上載、刪除 | 94,472 | 6,944 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | 完整的 API、其網站、Swagger UI 及請求日誌 | 107,364 | 6,648 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 以 0x00 及 0xFF 清除並驗證，再格式化為 FAT16、FAT32 或 exFAT；只有 JSON | 71,852 | 9,936 |
 
 除 RestFormat 外，每個範例都會從記憶卡回應 `/api/openapi.json`，並在 `/docs/` 提供 Swagger UI。建置超出開發板預算時，CI 會失敗。
+
+每個範例都是一個獨立的項目，並有一份說明其設計的 README。程式碼位於範例的 `src` 資料夾中，先按限界上下文分組，再按層分組：`domain` 存放規則，不包含任何 Arduino 標頭檔；`application` 存放用例及其所需的端口；`adapters` 存放 HTTP 控制器及儲存。`.ino` 檔案只負責建構轉接器並把它們連接起來。每個範例的 `tests` 資料夾存放其主機測試，其 `SD Card` 頁面亦遵循同樣的劃分。
 
 ## SD 卡網頁項目
 
@@ -198,7 +200,7 @@ pnpm run build
 graph LR
     subgraph Build time on a computer
         Spec[openapi.json] --> Gen[tools/madogen]
-        Gen --> Header[generated_api.h]
+        Gen --> Header[src/http/api.generated.h]
         Pages[SD Card web project] --> Vite[Vite and the kit]
         Spec --> Vite
         Vite --> Card[Card files and gz copies]
@@ -520,7 +522,7 @@ curl -s http://192.168.1.177/api/card/format
 
 ### 產生 API 程式碼
 
-每個 REST 草稿碼都有一個 `openapi.json`。[`tools/madogen`](tools/madogen/cli.py) 會把它轉換為 `generated_api.h`。這個檔案已提交至儲存庫，因此 Arduino IDE 無需安裝 Python 即可建置草稿碼。產生器只使用 Python 標準程式庫。
+每個 REST 草稿碼都有一個 `openapi.json`。[`tools/madogen`](tools/madogen/cli.py) 會把它轉換為 `src/http/api.generated.h`。這個檔案已提交至儲存庫，因此 Arduino IDE 無需安裝 Python 即可建置草稿碼。產生器只使用 Python 標準程式庫。
 
 ```sh
 python3 -m tools.madogen generate examples/RestApi
@@ -536,7 +538,7 @@ python3 -m tools.madogen check examples/RestApi
 - `read_<schema>_body()`，它檢查 `Content-Type` 及長度、讀取請求主體，並在 `mado::Problem` 中指出第一個欠缺的必要屬性；以及每個按 id 進行的 `GET` 對應的 `<operation>_url()`；
 - `send_card()`，它從記憶卡提供規格文件及其他所有路徑，沒有記憶卡時回傳 `503`。
 
-當 `generated_api.h` 與來源不再一致，或 `arduino_secrets.h` 載有真正的密鑰時，`check` 會失敗。CI 會對全部九個範例執行它。
+當 `src/http/api.generated.h` 與來源不再一致，或 `arduino_secrets.h` 載有真正的密鑰時，`check` 會失敗。CI 會對全部九個範例執行它。
 
 產生器接受 OpenAPI 3.1 的一個子集，並以 JSON 指標指出任何超出範圍的內容：
 
@@ -576,13 +578,13 @@ python3 -m tools.madogen secrets examples/RestApi --user admin
 
 | 測試組 | 指令 | 涵蓋範圍 |
 |:------|:--------|:-------|
-| 程式庫及範例 | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,182 個測試：RFC 9112 一致性表、剖析、路由、回應、記憶卡上的檔案、範圍請求、網絡輔助函式、SD 日誌、加密、權杖、範例的應用程式碼，以及每個模糊測試語料庫的重播 |
+| 程式庫及範例 | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,336 個測試：RFC 9112 一致性表、剖析、路由、回應、記憶卡上的檔案、範圍請求、網絡輔助函式、SD 日誌、加密、權杖、範例的應用程式碼，以及每個模糊測試語料庫的重播 |
 | 覆蓋率 | `gcovr build --root . --filter src/ --merge-lines --txt` | `src/` 的行及函數覆蓋率，CI 的下限為 95% |
 | 產生器及閘門 | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen`、斷言密度閘門、大小閘門及吞吐量工具的 91 個測試 |
-| 頁面 | `pnpm run check && pnpm run test && pnpm run build` | Biome、TypeScript、html-validate、106 個附 95% 覆蓋率閘門的 Vitest 測試，以及每張記憶卡的建置 |
+| 頁面 | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | 依賴審計、Biome、TypeScript、html-validate、127 個附 95% 覆蓋率閘門的 Vitest 測試，以及每張記憶卡的建置 |
 | 瀏覽器 | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | 32 個 Playwright 測試：以 320 px 及桌面闊度測試每個頁面及文件頁 |
 | 吞吐量 | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | 量度開發板的下載及上載速度，以 JSON 輸出 |
-| 產生的程式碼 | `python3 -m tools.madogen check examples/Rest*` | `generated_api.h` 與來源一致，且沒有提交真正的密鑰 |
+| 產生的程式碼 | `python3 -m tools.madogen check examples/Rest*` | `src/http/api.generated.h` 與來源一致，且沒有提交真正的密鑰 |
 | 模糊測試 | `cmake -S tests -B fuzz -DMADO_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build fuzz && fuzz/mado_fuzz_request tests/fuzz/corpus/request` | 啟用 AddressSanitizer 及 UBSan 的 libFuzzer，涵蓋伺服器、RestApi 及 RestFiles 應用程式、JSON 讀取器及文字解碼器 |
 | 大小預算 | `python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima examples/RestApi` | 按開發板預算檢查快閃記憶體及 RAM，編譯器警告為零 |
 

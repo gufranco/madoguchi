@@ -60,8 +60,10 @@ def test_lists_route_ids_in_spec_order_then_the_card_routes() -> None:
 
     # Assert
     assert (
-        "enum RouteId : uint8_t {\n  kGetItem,\n  kListItems,\n  kCreateItem,\n  kDeleteItem,\n"
-        "  kOpenApiDocument,\n  kCardFile,\n};" in text
+        "constexpr uint8_t kGetItem = 0U;\nconstexpr uint8_t kListItems = 1U;\n"
+        "constexpr uint8_t kCreateItem = 2U;\nconstexpr uint8_t kDeleteItem = 3U;\n"
+        "constexpr uint8_t kOpenApiDocument = 4U;\nconstexpr uint8_t kCardFile = 5U;\n"
+        in text
     )
 
 
@@ -135,7 +137,75 @@ def test_marks_secured_routes() -> None:
     text = render_api(spec, "items")
 
     # Assert
-    assert "    case kCreateItem:\n    case kDeleteItem:\n      return true;" in text
+    assert (
+        "return (!known) || (route == kCreateItem) || (route == kDeleteItem);" in text
+    )
+
+
+def test_leaves_out_token_routing_when_no_route_is_secured() -> None:
+    # Arrange
+    spec = api(tuple(op for op in operations() if not op.secured))
+
+    # Act
+    text = render_api(spec, "items")
+
+    # Assert
+    assert "route_needs_token" not in text
+
+
+def test_asserts_each_field_invariant_on_its_own() -> None:
+    # Arrange
+    spec = api(operations())
+
+    # Act
+    text = render_api(spec, "items")
+
+    # Assert
+    writer = text[text.index("bool write_item(") :]
+    assert writer.index(
+        "mado::check((value.name[sizeof(value.name) - 1U] == '\\0'))"
+    ) < (writer.index("mado::check((value.id >= 1) && (value.id <= 254))"))
+
+
+def test_writes_no_assertion_that_cannot_fail() -> None:
+    # Arrange
+    flag = Schema("Flag", (Field("on", Kind.BOOLEAN, 0, 0, 0, True, False),))
+    listing = Operation(
+        "listFlags", "get", "/api/flags", "/api/flags", "", False, "", ("Flag",)
+    )
+    spec = Api("Flags", (flag,), (listing,))
+
+    # Act
+    text = render_api(spec, "flags")
+
+    # Assert
+    assert "mado::check(true)" not in text
+    assert "  const bool sound = true;\n" in text
+
+
+def test_refuses_a_string_shorter_than_its_min_length() -> None:
+    # Arrange
+    named = Schema("Tag", (Field("name", Kind.STRING, 16, 1, 0, True, False),))
+    create = Operation("createTag", "post", "/api/tags", "/api/tags", "", False, "Tag")
+    spec = Api("Tags", (named,), (create,))
+
+    # Act
+    text = render_api(spec, "tags")
+
+    # Assert
+    assert "strnlen(&value.name[0], sizeof(value.name)) >= 1U" in text
+    assert "mado::JsonStatus::kTooShort" in text
+
+
+def test_skips_the_min_length_check_when_none_is_declared() -> None:
+    # Arrange
+    spec = api(operations())
+
+    # Act
+    text = render_api(spec, "items")
+
+    # Assert
+    assert "kTooShort" not in text
 
 
 def test_reads_path_ids_by_route() -> None:
@@ -147,7 +217,8 @@ def test_reads_path_ids_by_route() -> None:
 
     # Assert
     assert (
-        '    case kGetItem:\n    case kDeleteItem:\n      return mado::parse_path_id(path, PSTR("/api/items/"), id);'
+        "  if ((route == kGetItem) || (route == kDeleteItem)) {\n"
+        '    return mado::parse_path_id(path, PSTR("/api/items/"), resource_id);'
         in text
     )
 
@@ -242,7 +313,7 @@ def test_wraps_everything_in_the_sketch_namespace() -> None:
     text = render_api(spec, "rest_get")
 
     # Assert
-    assert "namespace rest_get {\n\nenum RouteId" in text
+    assert "namespace rest_get {\n\nconstexpr uint8_t kGetItem = 0U;" in text
     assert text.endswith("}\n\n}\n\n#endif\n")
 
 
@@ -299,6 +370,17 @@ def test_skips_the_body_reader_for_schemas_never_read() -> None:
     # Assert
     assert "read_item_body(" not in text
     assert "item_missing(" not in text
+
+
+def test_leaves_out_url_prefixes_when_nothing_is_written() -> None:
+    # Arrange
+    reads = api(tuple(op for op in operations() if op.method == "get"))
+
+    # Act
+    text = render_api(reads, "items")
+
+    # Assert
+    assert "get_item_url(" not in text
 
 
 def test_emits_a_url_prefix_for_each_get_by_id() -> None:

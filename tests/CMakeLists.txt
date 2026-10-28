@@ -52,15 +52,31 @@ set_target_properties(mado_cxx11_check PROPERTIES CXX_STANDARD 11 CXX_EXTENSIONS
 target_include_directories(mado_cxx11_check PRIVATE shim support ../src)
 target_compile_options(mado_cxx11_check PRIVATE ${MADO_STRICT_FLAGS})
 
-file(GLOB MADO_EXAMPLE_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/examples/*_test.cpp)
-add_executable(mado_example_tests ${MADO_EXAMPLE_TEST_SOURCES})
-target_link_libraries(mado_example_tests PRIVATE mado_support GTest::gtest_main)
-target_compile_options(mado_example_tests PRIVATE ${MADO_STRICT_FLAGS})
-
 enable_testing()
 include(GoogleTest)
 gtest_discover_tests(mado_tests)
-gtest_discover_tests(mado_example_tests)
+
+file(GLOB MADO_EXAMPLE_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/examples/*_test.cpp)
+if(MADO_EXAMPLE_TEST_SOURCES)
+  add_executable(mado_example_tests ${MADO_EXAMPLE_TEST_SOURCES})
+  target_link_libraries(mado_example_tests PRIVATE mado_support GTest::gtest_main)
+  target_compile_options(mado_example_tests PRIVATE ${MADO_STRICT_FLAGS})
+  gtest_discover_tests(mado_example_tests)
+endif()
+
+file(GLOB MADO_EXAMPLES LIST_DIRECTORIES true CONFIGURE_DEPENDS
+     ${CMAKE_CURRENT_SOURCE_DIR}/../examples/*)
+foreach(example IN LISTS MADO_EXAMPLES)
+  file(GLOB example_tests CONFIGURE_DEPENDS ${example}/tests/*.test.cpp)
+  if(example_tests)
+    get_filename_component(example_name ${example} NAME)
+    string(TOLOWER ${example_name} example_target)
+    add_executable(mado_example_${example_target} ${example_tests})
+    target_link_libraries(mado_example_${example_target} PRIVATE mado_support GTest::gtest_main)
+    target_compile_options(mado_example_${example_target} PRIVATE ${MADO_STRICT_FLAGS})
+    gtest_discover_tests(mado_example_${example_target} TEST_PREFIX "${example_name}.")
+  endif()
+endforeach()
 add_test(NAME cxx11_check COMMAND mado_cxx11_check)
 
 set(MADO_FUZZ_TARGETS request rest files json text)
