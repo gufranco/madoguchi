@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "../src/identity/adapters/card_failure.log.h"
+#include "../src/identity/adapters/card_failure.store.h"
 #include "../src/identity/adapters/eeprom_session.counter.h"
 #include "../src/identity/adapters/flash_secrets.authority.h"
 #include "../src/identity/application/access.service.h"

@@ -65,7 +65,7 @@ RestAuth/
   src/identity/application/token_authority.port.h    TokenAuthorityPort、FailureLogPort
   src/identity/application/access.service.h      AccessService
   src/identity/adapters/flash_secrets.authority.h    使用快閃記憶體密鑰的 PBKDF2 及 HS256
-  src/identity/adapters/card_failure.log.h       /LOGIN.TXT 中的失敗次數
+  src/identity/adapters/card_failure.store.h     /LOGIN.TXT 中的失敗次數
   src/identity/adapters/eeprom_session.counter.h 每次啟動一個工作階段
   src/identity/adapters/auth.controller.h        透過 HTTP 登入
   src/greetings/domain/greeting.value.h          問候文字

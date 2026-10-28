@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 #include "audit/application/request_journal.service.h"
-#include "identity/adapters/card_failure.log.h"
+#include "identity/adapters/card_failure.store.h"
 #include "identity/adapters/flash_secrets.authority.h"
 #include "identity/application/access.service.h"
 #include "items/adapters/card_item.repository.h"

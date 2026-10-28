@@ -65,7 +65,7 @@ RestAuth/
   src/identity/application/token_authority.port.h    TokenAuthorityPort, FailureLogPort
   src/identity/application/access.service.h      AccessService
   src/identity/adapters/flash_secrets.authority.h    PBKDF2 and HS256 with flash secrets
-  src/identity/adapters/card_failure.log.h       failure count in /LOGIN.TXT
+  src/identity/adapters/card_failure.store.h     failure count in /LOGIN.TXT
   src/identity/adapters/eeprom_session.counter.h one session per boot
   src/identity/adapters/auth.controller.h        login over HTTP
   src/greetings/domain/greeting.value.h          the greeting text

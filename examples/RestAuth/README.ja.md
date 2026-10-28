@@ -65,7 +65,7 @@ RestAuth/
   src/identity/application/token_authority.port.h    TokenAuthorityPort、FailureLogPort
   src/identity/application/access.service.h      AccessService
   src/identity/adapters/flash_secrets.authority.h    フラッシュの秘密情報によるPBKDF2とHS256
-  src/identity/adapters/card_failure.log.h       /LOGIN.TXTの失敗回数
+  src/identity/adapters/card_failure.store.h     /LOGIN.TXTの失敗回数
   src/identity/adapters/eeprom_session.counter.h 起動ごとに1つのセッション
   src/identity/adapters/auth.controller.h        HTTPでのログイン
   src/greetings/domain/greeting.value.h          挨拶の文
