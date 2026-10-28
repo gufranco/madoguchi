@@ -47,7 +47,8 @@ inline bool tag_at(const char* const text, const uint16_t start, const char* con
   return same && (end < kMaxStringScan);
 }
 
-inline bool etag_in(const char* const header, const char* const tag, const bool flash) {
+inline bool etag_in(const char* const header, const char* const tag, const bool flash,
+                    const bool strong) {
   const bool valid = check(tag != nullptr);
   if ((!valid) || (header == nullptr)) {
     return false;
@@ -66,7 +67,7 @@ inline bool etag_in(const char* const header, const char* const tag, const bool 
     const bool weak = (header[index] == 'W') && (header[index + 1U] == '/');
     index = static_cast<uint16_t>(index + (weak ? 2U : 0U));
     uint16_t end = index;
-    const bool same = tag_at(header, index, tag, flash, end);
+    const bool same = tag_at(header, index, tag, flash, end) && ((!strong) || (!weak));
     const uint16_t after = skip_blanks(header, end);
     if (same && ((header[after] == ',') || (header[after] == '\0'))) {
       return true;
@@ -83,13 +84,13 @@ inline bool etag_in(const char* const header, const char* const tag, const bool 
 
 inline bool etag_matches(const char* const header, const __FlashStringHelper* const etag) {
   const bool valid = check(etag != nullptr);
-  return valid && detail::etag_in(header, flash_address(etag), true);
+  return valid && detail::etag_in(header, flash_address(etag), true, false);
 }
 
 inline bool etag_matches(const char* const header, const char* const etag) {
   const bool valid = check(etag != nullptr) && check(etag[0] != '\0');
   const bool weak = valid && (etag[0] == 'W') && (etag[1] == '/');
-  return valid && detail::etag_in(header, weak ? &etag[2] : etag, false);
+  return valid && detail::etag_in(header, weak ? &etag[2] : etag, false, false);
 }
 
 }

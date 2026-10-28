@@ -85,6 +85,12 @@ class Exchange {
     return (sound && consistent) ? remaining_ : 0UL;
   }
 
+  uint32_t client_address() const {
+    const bool has_client = check(client_ != nullptr);
+    const uint32_t address = has_client ? static_cast<uint32_t>(client_->remoteIP()) : 0U;
+    return check(address != 0U) ? address : 0U;
+  }
+
   ClientT* client() {
     const bool has_client = check(client_ != nullptr);
     const bool has_output = check(out_ != nullptr);

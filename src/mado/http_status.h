@@ -33,6 +33,7 @@ constexpr uint16_t kNotAcceptable = 406U;
 constexpr uint16_t kRequestTimeout = 408U;
 constexpr uint16_t kConflict = 409U;
 constexpr uint16_t kLengthRequired = 411U;
+constexpr uint16_t kPreconditionFailed = 412U;
 constexpr uint16_t kContentTooLarge = 413U;
 constexpr uint16_t kUriTooLong = 414U;
 constexpr uint16_t kUnsupportedMediaType = 415U;

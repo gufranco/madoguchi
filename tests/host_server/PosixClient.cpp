@@ -1,5 +1,7 @@
 #include "PosixClient.h"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -44,4 +46,13 @@ void PosixClient::stop() {
     close(descriptor_);
   }
   descriptor_ = -1;
+}
+
+IPAddress PosixClient::remoteIP() const {
+  sockaddr_in peer = {};
+  socklen_t length = sizeof(peer);
+  const int named = getpeername(descriptor_, reinterpret_cast<sockaddr*>(&peer), &length);
+  const uint32_t address = (named == 0) ? ntohl(peer.sin_addr.s_addr) : 0U;
+  return IPAddress(static_cast<uint8_t>(address >> 24U), static_cast<uint8_t>(address >> 16U),
+                   static_cast<uint8_t>(address >> 8U), static_cast<uint8_t>(address));
 }

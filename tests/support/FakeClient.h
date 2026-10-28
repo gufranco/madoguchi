@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include <Arduino.h>
+
 class FakeClient {
  public:
   explicit FakeClient(std::string input);
@@ -16,9 +18,11 @@ class FakeClient {
   size_t write(uint8_t value);
   size_t write(const uint8_t* buffer, size_t size);
   uint8_t connected() const;
+  IPAddress remoteIP() const;
   void stop();
 
   void disconnect();
+  void set_remote(IPAddress address);
   void limit_available(size_t max_bytes);
   void limit_write(size_t max_bytes);
   void overstate_block_reads(int extra);
@@ -46,6 +50,7 @@ class FakeClient {
   size_t write_budget_;
   std::string output_;
   bool connected_;
+  IPAddress remote_{192, 168, 1, 50};
   bool stopped_;
   uint32_t single_byte_reads_;
   uint32_t block_reads_;

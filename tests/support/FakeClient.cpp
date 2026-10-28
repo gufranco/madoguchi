@@ -136,3 +136,11 @@ uint32_t FakeClient::block_reads() const {
 uint32_t FakeClient::write_calls() const {
   return write_calls_;
 }
+
+IPAddress FakeClient::remoteIP() const {
+  return remote_;
+}
+
+void FakeClient::set_remote(IPAddress address) {
+  remote_ = address;
+}

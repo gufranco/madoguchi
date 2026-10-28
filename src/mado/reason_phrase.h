@@ -37,6 +37,7 @@ inline const char* reason_phrase(const uint16_t code) {
     case http::kRequestTimeout: return PSTR("Request Timeout");
     case http::kConflict: return PSTR("Conflict");
     case http::kLengthRequired: return PSTR("Length Required");
+    case http::kPreconditionFailed: return PSTR("Precondition Failed");
     case http::kContentTooLarge: return PSTR("Content Too Large");
     case http::kUriTooLong: return PSTR("URI Too Long");
     case http::kUnsupportedMediaType: return PSTR("Unsupported Media Type");

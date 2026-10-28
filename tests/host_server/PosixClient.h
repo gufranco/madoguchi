@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <Arduino.h>
+
 class PosixClient {
  public:
   explicit PosixClient(int descriptor);
@@ -14,6 +16,7 @@ class PosixClient {
   size_t write(uint8_t value);
   size_t write(const uint8_t* buffer, size_t size);
   uint8_t connected() const;
+  IPAddress remoteIP() const;
   void stop();
 
  private:
