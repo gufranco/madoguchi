@@ -3,3 +3,8 @@
 /build/
 __pycache__/
 .ruff_cache/
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/

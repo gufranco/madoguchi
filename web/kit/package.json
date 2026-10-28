@@ -1,0 +1,21 @@
+{
+  "name": "@madoguchi/kit",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api.ts",
+    "./auth": "./src/auth.ts",
+    "./cdn": "./src/cdn.ts",
+    "./docs": "./src/docs.ts",
+    "./items": "./src/items.ts",
+    "./names": "./src/names.ts",
+    "./page": "./src/page.ts",
+    "./testing": "./src/testing.ts",
+    "./theme": "./src/theme.ts",
+    "./vite": "./src/vite.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --coverage"
+  }
+}

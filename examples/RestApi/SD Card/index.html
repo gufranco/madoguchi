@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Madoguchi RestApi</title>
+    <link rel="stylesheet" href="%PICO_CSS_HREF%" integrity="%PICO_CSS_INTEGRITY%" crossorigin="anonymous">
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <header>
+      <nav>
+        <ul>
+          <li><strong>Madoguchi</strong></li>
+        </ul>
+        <ul>
+          <li><a href="/docs/">API docs</a></li>
+          <li><button type="button" data-theme-toggle>Switch theme</button></li>
+        </ul>
+      </nav>
+    </header>
+    <main>
+      <h1>The full REST API</h1>
+      <p>Read the <a href="/docs/">API docs</a> or the <a href="/api/openapi.json">OpenAPI document</a>.</p>
+      <section aria-labelledby="login-title">
+        <h2 id="login-title">Sign in</h2>
+        <form id="login">
+          <label for="username">User name</label>
+          <input id="username" name="username" type="text" autocomplete="username" maxlength="16" required>
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="64" required>
+          <button type="submit">Sign in</button>
+        </form>
+      </section>
+      <section aria-labelledby="items-title">
+        <h2 id="items-title">Items</h2>
+        <ul id="items"></ul>
+        <form id="add">
+          <label for="item-name">Name</label>
+          <input id="item-name" name="name" type="text" maxlength="16" required>
+          <label for="item-value">Value</label>
+          <input id="item-value" name="value" type="number" min="-100000" max="100000" value="0" required>
+          <label><input id="item-on" name="on" type="checkbox"> On</label>
+          <button type="submit">Add the item</button>
+        </form>
+      </section>
+      <section aria-labelledby="log-title">
+        <h2 id="log-title">Request log</h2>
+        <button id="show-log" type="button">Show the end of the log</button>
+        <pre id="log"></pre>
+      </section>
+    </main>
+    <footer>
+      <p role="status" aria-live="polite"></p>
+    </footer>
+  </body>
+</html>

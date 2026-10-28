@@ -1,0 +1,9 @@
+{
+  "name": "@madoguchi/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "e2e": "playwright test"
+  }
+}

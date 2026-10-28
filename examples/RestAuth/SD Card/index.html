@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Madoguchi RestAuth</title>
+    <link rel="stylesheet" href="%PICO_CSS_HREF%" integrity="%PICO_CSS_INTEGRITY%" crossorigin="anonymous">
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <header>
+      <nav>
+        <ul>
+          <li><strong>Madoguchi</strong></li>
+        </ul>
+        <ul>
+          <li><a href="/docs/">API docs</a></li>
+          <li><button type="button" data-theme-toggle>Switch theme</button></li>
+        </ul>
+      </nav>
+    </header>
+    <main>
+      <h1>Sign in and call a protected route</h1>
+      <section aria-labelledby="login-title">
+        <h2 id="login-title">Sign in</h2>
+        <form id="login">
+          <label for="username">User name</label>
+          <input id="username" name="username" type="text" autocomplete="username" maxlength="16" required>
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="64" required>
+          <button type="submit">Sign in</button>
+        </form>
+      </section>
+      <section aria-labelledby="greeting-title">
+        <h2 id="greeting-title">Protected route</h2>
+        <button id="greet" type="button">Read the greeting</button>
+        <p id="greeting" aria-live="polite"></p>
+      </section>
+    </main>
+    <footer>
+      <p role="status" aria-live="polite"></p>
+    </footer>
+  </body>
+</html>

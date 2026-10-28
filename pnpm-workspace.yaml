@@ -1,0 +1,4 @@
+packages:
+  - "web/kit"
+  - "web/e2e"
+  - "examples/*/SD Card"

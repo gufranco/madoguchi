@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Madoguchi RestPost</title>
+    <link rel="stylesheet" href="%PICO_CSS_HREF%" integrity="%PICO_CSS_INTEGRITY%" crossorigin="anonymous">
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <header>
+      <nav>
+        <ul>
+          <li><strong>Madoguchi</strong></li>
+        </ul>
+        <ul>
+          <li><a href="/docs/">API docs</a></li>
+          <li><button type="button" data-theme-toggle>Switch theme</button></li>
+        </ul>
+      </nav>
+    </header>
+    <main>
+      <h1>Create an item with POST</h1>
+      <section aria-labelledby="create-title">
+        <h2 id="create-title">New item</h2>
+        <form>
+          <label for="item-name">Name</label>
+          <input id="item-name" name="name" type="text" maxlength="16" required>
+          <label><input id="item-on" name="on" type="checkbox"> On</label>
+          <button type="submit">Create the item</button>
+        </form>
+        <p id="result" aria-live="polite"></p>
+      </section>
+    </main>
+    <footer>
+      <p role="status" aria-live="polite"></p>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "madoguchi-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "check": "biome check . && pnpm -r --workspace-concurrency=1 run typecheck && pnpm -r run lint:html",
+    "test": "pnpm -r run test",
+    "build": "pnpm -r --filter \"./examples/**\" run build",
+    "e2e": "pnpm --filter @madoguchi/e2e run e2e"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.3",
+    "@faker-js/faker": "10.6.0",
+    "@minify-html/node": "0.18.1",
+    "@playwright/test": "1.64.0",
+    "@types/node": "26.6.5",
+    "@vitest/coverage-v8": "5.0.5",
+    "happy-dom": "21.0.4",
+    "html-validate": "11.17.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}
