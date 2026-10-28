@@ -4,7 +4,9 @@
 #ifndef REST_AUTH_IDENTITY_ACCESS_SERVICE_H
 #define REST_AUTH_IDENTITY_ACCESS_SERVICE_H
 
+#include <mado/GuardEntry.h>
 #include <mado/LoginGuard.h>
+#include <mado/LoginGuardTable.h>
 #include <mado/TokenClaims.h>
 #include <mado/TokenStatus.h>
 #include <mado/check.h>
@@ -40,35 +42,38 @@ class AccessService {
   void begin(const uint32_t session) {
     const bool signable = mado::check(session > 0U) && mado::check(session <= kLastClaimValue);
     session_ = signable ? session : 0U;
-    guard_ = mado::LoginGuard{};
-    guard_.restore(failures_->load());
+    mado::GuardEntry stored[kGuardSlots] = {};
+    const bool loaded = failures_->load(stored);
+    guards_ = mado::LoginGuardTable<kGuardSlots>{};
+    guards_.restore(stored);
+    static_cast<void>(loaded);
   }
 
-  Admission admit(const uint32_t now) const {
+  Admission admit(const uint32_t address, const uint32_t now) const {
     if (!mado::check(authority_->provisioned())) {
       return Admission::kUnprovisioned;
     }
-    return mado::check(!guard_.locked(now)) ? Admission::kOpen : Admission::kLocked;
+    return mado::check(!guards_.locked(address, now)) ? Admission::kOpen : Admission::kLocked;
   }
 
-  uint32_t retry_after(const uint32_t now) const {
-    const uint32_t wait = guard_.retry_after(now);
+  uint32_t retry_after(const uint32_t address, const uint32_t now) const {
+    const uint32_t wait = guards_.retry_after(address, now);
     const bool waiting =
         mado::check(wait > 0U) && mado::check(wait <= mado::LoginGuard::kLockSeconds);
     return waiting ? wait : 1U;
   }
 
-  SignInStatus sign_in(const Credentials& credentials, const uint32_t now,
+  SignInStatus sign_in(const Credentials& credentials, const uint32_t address, const uint32_t now,
                        char (&token)[kTokenTextSize]) {
     token[0] = '\0';
     const bool complete =
         mado::check(credentials_status(credentials) == CredentialsStatus::kComplete);
     if (!(complete && mado::check(authority_->matches(credentials)))) {
-      guard_.record_failure(now);
+      guards_.record_failure(address, now);
       remember();
       return SignInStatus::kRefused;
     }
-    guard_.record_success();
+    guards_.record_success(address);
     remember();
     return issue(credentials, now, token) ? SignInStatus::kSignedIn : SignInStatus::kUnsigned;
   }
@@ -76,6 +81,9 @@ class AccessService {
   mado::TokenStatus authorize(const char* const header, const uint32_t now,
                               mado::TokenClaims& claims) const {
     claims = mado::TokenClaims{};
+    if (!mado::check(now <= kLastClaimValue)) {
+      return mado::TokenStatus::kExpired;
+    }
     const mado::TokenStatus status = authority_->verify(header, session_, now, claims);
     const bool bounded = mado::check(claims.ends_at <= kLastClaimValue);
     return bounded ? status : mado::TokenStatus::kMalformed;
@@ -83,7 +91,9 @@ class AccessService {
 
  private:
   void remember() {
-    const bool saved = failures_->save(guard_.failures());
+    mado::GuardEntry entries[kGuardSlots] = {};
+    guards_.snapshot(entries);
+    const bool saved = failures_->save(entries);
     static_cast<void>(saved);
   }
 
@@ -100,7 +110,7 @@ class AccessService {
 
   const AuthorityT* authority_;
   FailuresT* failures_;
-  mado::LoginGuard guard_ = {};
+  mado::LoginGuardTable<kGuardSlots> guards_ = {};
   uint32_t session_ = 0U;
 };
 

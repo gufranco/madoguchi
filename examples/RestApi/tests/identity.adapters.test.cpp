@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <mado/LoginGuard.h>
 #include <mado/TokenClaims.h>
 #include <mado/TokenStatus.h>
 #include <stdint.h>
@@ -23,6 +24,10 @@ using Authority = identity::FlashSecretsAuthority<test_secrets::TestSecrets>;
 using Failures = identity::CardFailureLog<FakeSd, FILE_READ, FILE_WRITE>;
 using Access = identity::AccessService<Authority, Failures>;
 
+constexpr uint32_t kClient = 0x0A00000AUL;
+constexpr uint32_t kOwner = 0x0B00000BUL;
+constexpr const char* kEmptyRows = "00000000 0\n00000000 0\n00000000 0\n";
+
 identity::Credentials credentials_of(const std::string& user, const std::string& password) {
   identity::Credentials credentials = {};
   static_cast<void>(memcpy(&credentials.username[0], user.data(), user.size()));
@@ -44,9 +49,9 @@ class IdentityAdaptersTest : public ::testing::Test {
     return access_;
   }
 
-  identity::SignInStatus sign_in(const std::string& password) {
+  identity::SignInStatus sign_in(const std::string& password, const uint32_t address = kClient) {
     char token[identity::kTokenTextSize] = {};
-    return access_.sign_in(credentials_of("admin", password), 10U, token);
+    return access_.sign_in(credentials_of("admin", password), address, 10U, token);
   }
 
  private:
@@ -105,18 +110,19 @@ TEST_F(IdentityAdaptersTest, WritesEachFailureToTheCard) {
   static_cast<void>(sign_in(data().word(12U)));
 
   // Assert
-  EXPECT_EQ(card().files()["/LOGIN.TXT"], "2\n");
+  EXPECT_EQ(card().files()["/LOGIN.TXT"], std::string("0a00000a 2\n") + kEmptyRows);
 }
 
 TEST_F(IdentityAdaptersTest, StaysLockedAcrossARestart) {
   // Arrange
-  card().files()["/LOGIN.TXT"] = "5\n";
+  card().files()["/LOGIN.TXT"] = std::string("0a00000a 5\n") + kEmptyRows;
 
   // Act
   access().begin(8U);
 
   // Assert
-  EXPECT_EQ(access().admit(10U), identity::Admission::kLocked);
+  EXPECT_EQ(access().admit(kClient, 10U), identity::Admission::kLocked);
+  EXPECT_EQ(access().admit(kOwner, 10U), identity::Admission::kOpen);
 }
 
 TEST_F(IdentityAdaptersTest, AuthorizesTheTokenItSigned) {
@@ -124,7 +130,7 @@ TEST_F(IdentityAdaptersTest, AuthorizesTheTokenItSigned) {
   access().begin(7U);
   char token[identity::kTokenTextSize] = {};
   static_cast<void>(
-      access().sign_in(credentials_of("admin", &test_secrets::kPassword[0]), 10U, token));
+      access().sign_in(credentials_of("admin", &test_secrets::kPassword[0]), kOwner, 10U, token));
   const std::string header = std::string("Bearer ") + &token[0];
   mado::TokenClaims claims = {};
 
@@ -141,7 +147,7 @@ TEST_F(IdentityAdaptersTest, RefusesATokenFromAnEarlierSession) {
   access().begin(7U);
   char token[identity::kTokenTextSize] = {};
   static_cast<void>(
-      access().sign_in(credentials_of("admin", &test_secrets::kPassword[0]), 10U, token));
+      access().sign_in(credentials_of("admin", &test_secrets::kPassword[0]), kOwner, 10U, token));
   access().begin(8U);
   const std::string header = std::string("Bearer ") + &token[0];
   mado::TokenClaims claims = {};
@@ -151,6 +157,37 @@ TEST_F(IdentityAdaptersTest, RefusesATokenFromAnEarlierSession) {
 
   // Assert
   EXPECT_EQ(status, mado::TokenStatus::kStaleSession);
+}
+
+TEST_F(IdentityAdaptersTest, LocksOneClientWithoutLockingAnother) {
+  // Arrange
+  access().begin(7U);
+  for (uint8_t attempt = 0U; attempt < mado::LoginGuard::kMaxFailures; ++attempt) {
+    static_cast<void>(sign_in(data().word(12U), kClient));
+  }
+
+  // Act
+  const identity::SignInStatus owner = sign_in(&test_secrets::kPassword[0], kOwner);
+
+  // Assert
+  EXPECT_EQ(access().admit(kClient, 10U), identity::Admission::kLocked);
+  EXPECT_EQ(owner, identity::SignInStatus::kSignedIn);
+}
+
+TEST_F(IdentityAdaptersTest, LocksANewClientWhileEveryTrackedAddressIsLocked) {
+  // Arrange
+  access().begin(7U);
+  for (uint32_t client = 1U; client <= identity::kGuardSlots; ++client) {
+    for (uint8_t attempt = 0U; attempt < mado::LoginGuard::kMaxFailures; ++attempt) {
+      static_cast<void>(sign_in(data().word(12U), kClient + client));
+    }
+  }
+
+  // Act
+  const identity::Admission newcomer = access().admit(kOwner, 10U);
+
+  // Assert
+  EXPECT_EQ(newcomer, identity::Admission::kLocked);
 }
 
 }

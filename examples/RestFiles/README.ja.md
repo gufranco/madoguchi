@@ -14,8 +14,8 @@ Ethernetシールドを載せたArduino Uno R4 MinimaのSDカード用ファイ�
 | ユースケース | `FileLibrary`は必要に応じてカードをマウントし、一覧し、開き、SHA-256を計算しながら一時ファイルを通して保存し、削除します。書き込みのたびに変わるバージョン番号がETagの元になります。 |
 | アダプター | `FilesController`はHTTP、範囲、ETag、ダウンロードをユースケースに対応づけ、`percent.encoding.h`は新しいファイルの`Location`を書きます。 |
 | コンポジションルート | [`RestFiles.ino`](RestFiles.ino)がアナログノイズでバージョンの種を作り、ライブラリを組み立て、DHCPと`madofiles.local`のmDNSを始めます。 |
-| テスト | 2ファイルのホストテスト29件、libFuzzerのターゲット、分岐カバレッジ96パーセントのページテスト20件。 |
-| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.03個のアサーション。 |
+| テスト | 4ファイルのホストテスト55件、libFuzzerのターゲット、分岐カバレッジ96パーセントのページテスト21件。 |
+| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.05個のアサーション。 |
 
 ## アーキテクチャ
 
@@ -50,6 +50,7 @@ RestFiles/
   openapi.json                                 API契約
   src/http/api.generated.h                     生成
   src/http/api.router.h                        4つのファイルのルート、カードのページ
+  src/identity/...                             ログイン。RestAuthと同じコード
   src/files/domain/file_path.value.h           FilePath、is_file_path
   src/files/domain/upload.policy.h             upload_fits、DigestClaim、digest_accepted
   src/files/application/file_card.port.h       FileCardPort
@@ -62,7 +63,7 @@ RestFiles/
 
 ## APIエンドポイント
 
-認証が必要なルートはありません。
+一覧とダウンロードは公開で、アップロードと削除にはベアラートークンが必要です。ログインと安全な書き込みの節を参照してください。
 
 | メソッド | エンドポイント | 説明 |
 |:---------|:---------------|:-----|
@@ -101,7 +102,7 @@ RestFiles/
 
 ### バージョンはユースケースに置く
 
-書き込み、削除、再マウントが成功するたびに`FileLibrary`のバージョンが上がります。`open`はそれを`mado::FileStamp`に入れて返し、コントローラーはサイズとバージョンから弱いETagを作ります。種は起動時のアナログノイズから作るので、ボードの電源が切れている間に変わったファイルに再起動前のタグが一致することはありません。
+書き込み、削除、再マウントが成功するたびに`FileLibrary`のバージョンが上がります。`open`はそれを`mado::FileStamp`に入れて返し、コントローラーはサイズとバージョンから強いETagを作ります。種は起動時のアナログノイズから作るので、ボードの電源が切れている間に変わったファイルに再起動前のタグが一致することはありません。
 
 ### 長い名前を1か所で確かめる
 
@@ -111,15 +112,24 @@ RestFiles/
 
 | できること | 今はしない理由 | このままのリスク |
 |:-----------|:---------------|:-----------------|
-| 認証 | RestApiとRestAuthが示す | ネットワーク上の誰でもファイルを読み、置き換え、削除できる |
 | ルート以下のフォルダー | 一覧と名前は平らな構造 | サブフォルダーのファイルにはページからしか届かない |
 | 一覧の33件目以降 | 上限があるからループの停止を証明できる | 33件目以降は一覧に出ない |
 
 ## 前提
 
-- ネットワークは信頼できる。認証もTLSもない。
+- ネットワークは平文のパスワードとトークンを送れる程度に信頼できる。TLSはない。
 - カードはSdFatが読めるFAT16、FAT32、exFATのいずれか。
-- アップロードは`Repr-Digest`を計算するページから来る。それなしのcurlのアップロードは検査なしで受け付ける。
+- すべてのアップロードは`Repr-Digest`を持つ。ページは自動で計算し、curlでは手で計算する。
+
+## ログインと安全な書き込み
+
+一覧とダウンロードは公開のままなので、ページのダウンロードリンクはそのまま使えます。`PUT`と`DELETE`にはベアラートークンが必要です。`{"username":"admin","password":"..."}`でログインすると、15分間かつボードが再起動するまで有効なトークンが返り、トークンがなければ`WWW-Authenticate: Bearer`付きの`401`を返します。
+
+1つのクライアントアドレスからログインに5回失敗すると、そのアドレスは`429`と`Retry-After`で15分間ロックされ、ほかのアドレスはログインを続けられます。表は4つのアドレスを持ち、4つすべてがロック中の間は新しいアドレスもロックされるので、アドレスを替えてもロックは解けません。 アドレスごとの回数は`/LOGIN.TXT`に書き込まれるので、ロックは再起動後も残ります。
+
+ビルドの前に`python3 -m tools.madogen secrets examples/RestFiles --user admin`でアカウントを[`arduino_secrets.h`](arduino_secrets.h)に書き込みます。コミットされているファイルはすべてゼロの仮の値で、ログインには必ず`503`を返します。
+
+`GET`は、名前、サイズ、書き込み・削除・再マウントのたびに上がるバージョンから作る強い`ETag`を送るので、`If-Range`でダウンロードを再開できます。そのタグを`PUT`の`If-Match`で送ると、その後にファイルが変わっていればアップロードは`412`を返します。`Repr-Digest: sha-256=:<base64>:`のないアップロードは`400`を返します。
 
 ## テスト
 
@@ -131,9 +141,11 @@ ctest --test-dir build -R '^RestFiles\.' --output-on-failure
 | ファイル | テスト数 | 対象 |
 |:---------|---------:|:-----|
 | [`files.domain.test.cpp`](tests/files.domain.test.cpp) | 7 | 長い名前、予約文字、8 MiBの上限、ダイジェスト、`Location`のエンコード |
-| [`files.api.test.cpp`](tests/files.api.test.cpp) | 22 | 一覧、範囲、ETagと`304`、ダウンロード、ダイジェストありとなしのアップロード、拒否された書き込みと削除、後から挿したカード |
+| [`files.api.test.cpp`](tests/files.api.test.cpp) | 29 | 一覧、範囲、ETagと`304`、ダウンロード、ダイジェストありとなしのアップロード、拒否された書き込みと削除、後から挿したカード |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROMカウンター、ログイン、カード上のアドレスごとの失敗回数、再起動をまたぐロックアウト、トークンの確認 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 認証情報の規則、セッションカウンター、トークンの終了時刻 |
 
-ファズターゲット[`files_fuzz.cpp`](../../tests/fuzz/files_fuzz.cpp)は同じルーターにランダムなリクエストを送ります。`cd "SD Card" && pnpm run test`は20件のページテストを実行します。
+ファズターゲット[`files_fuzz.cpp`](../../tests/fuzz/files_fuzz.cpp)は同じルーターにランダムなリクエストを送ります。`cd "SD Card" && pnpm run test`は21件のページテストを実行します。
 
 ## 前提条件
 
@@ -149,6 +161,7 @@ ctest --test-dir build -R '^RestFiles\.' --output-on-failure
 ## はじめに
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestFiles --user admin && cd examples/RestFiles
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -158,7 +171,8 @@ cd "SD Card" && pnpm install && pnpm run build
 ボードはDHCPにアドレスを求め、得られなければ`192.168.1.178`を使います。`madofiles.local`として応答します。
 
 ```bash
-curl -T notes.txt http://madofiles.local/api/files/notes.txt
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://madofiles.local/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -T notes.txt -H "Authorization: Bearer $TOKEN" -H "Repr-Digest: sha-256=:$(openssl dgst -sha256 -binary notes.txt | base64):" http://madofiles.local/api/files/notes.txt
 curl http://madofiles.local/api/files
 ```
 
@@ -166,7 +180,7 @@ curl http://madofiles.local/api/files
 
 | 分類 | 技術 |
 |:-----|:-----|
-| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中94,472バイト、RAM 32,768バイト中6,944バイト |
+| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中104,108バイト、RAM 32,768バイト中7,048バイト |
 | HTTP | Madoguchi：範囲、ETag、SHA-256、mDNS、DHCPの代替アドレス |
 | カード | 長い名前に対応したSdFat 2.3.0 |
 | ネットワーク | Ethernet 2.0.2 |

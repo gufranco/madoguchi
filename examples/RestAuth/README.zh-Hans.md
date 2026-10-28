@@ -15,8 +15,8 @@
 | 适配器 | `FlashSecretsAuthority` 从闪存读取密钥、盐和哈希；`CardFailureLog` 把失败次数保存在卡上；`EepromSessionCounter` 记录启动次数；两个控制器负责 HTTP。 |
 | 组合根 | [`RestAuth.ino`](RestAuth.ino) 挂载卡、创建适配器和服务，并从 EEPROM 开始一个新会话。 |
 | 安全 | 常量时间比较；连续五次失败后锁定 15 分钟，重启后依然有效；令牌在下次启动时失效。 |
-| 测试 | 三个文件中的 26 个主机测试，以及覆盖率 100% 的 6 个页面测试。 |
-| 规则 | JPL D-60411 与 Power of Ten：不用堆、不用虚函数、不用函数指针，每个函数平均 2.02 个断言。 |
+| 测试 | 三个文件中的 28 个主机测试，以及覆盖率 100% 的 6 个页面测试。 |
+| 规则 | JPL D-60411 与 Power of Ten：不用堆、不用虚函数、不用函数指针，每个函数平均 2.09 个断言。 |
 
 ## 架构
 
@@ -124,12 +124,15 @@ RestAuth/
 |:-----------|:---------------|:-----------------|
 | TLS | 开发板没有 TLS 协议栈 | 凭据和令牌以明文在网络上传输 |
 | 多个用户 | 一个用户足以演示 | 所有人共用一个账户 |
-| 按客户端地址锁定 | 单个计数器更简单 | 一个攻击者就能把主人锁在外面 15 分钟 |
 
 ## 假设
 
 - 网络足够可信，可以传输明文密码。
 - [`arduino_secrets.h`](arduino_secrets.h) 用 `python3 -m tools.madogen secrets examples/RestAuth --user admin` 生成，真正的文件从不提交。
+
+## 登录与安全写入
+
+同一客户端地址登录失败五次，该地址会以 `429` 和 `Retry-After` 锁定 15 分钟，其他地址仍可登录。表中保存四个地址，四个都被锁定时新地址也被锁定，所以轮换地址无法解除锁定。 每个地址的次数写入 `/LOGIN.TXT`，所以锁定在重启后依然有效。
 
 ## 测试
 
@@ -141,7 +144,7 @@ ctest --test-dir build -R '^RestAuth\.' --output-on-failure
 | 文件 | 测试数 | 覆盖内容 |
 |:-----|------:|:---------|
 | [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 12 | 凭据规则、会话计数器的五种情况、令牌结束时间、问候 |
-| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 7 | EEPROM 计数器、登录、卡上的失败次数、跨重启的锁定、令牌检查 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 计数器、登录、卡上的失败次数、跨重启的锁定、令牌检查 |
 | [`auth.api.test.cpp`](tests/auth.api.test.cpp) | 7 | 登录、错误密码、锁定、问候、缺失、被篡改和过期的令牌 |
 
 `cd "SD Card" && pnpm run test` 以 100% 覆盖率运行 6 个页面测试。页面只在内存中保存令牌。
@@ -177,7 +180,7 @@ curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/greeting
 
 | 类别 | 技术 |
 |:-----|:-----|
-| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 87,496 字节，RAM 32,768 字节中用 6,184 字节 |
+| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 88,324 字节，RAM 32,768 字节中用 6,224 字节 |
 | HTTP 和认证 | Madoguchi：HS256、PBKDF2-HMAC-SHA256、`LoginGuard` |
 | 卡 | SdFat 2.3.0 |
 | 网络 | Ethernet 2.0.2 |

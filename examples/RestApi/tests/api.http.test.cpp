@@ -780,4 +780,144 @@ TEST_F(RestApiTest, SkipsAStoredItemItCannotRead) {
             R"({"id":3,"name":"fan","value":1,"on":false})");
 }
 
+std::string etag_of(const std::string& response) {
+  const size_t start = response.find("ETag: ");
+  if (start == std::string::npos) {
+    return "";
+  }
+  return response.substr(start + 6U, response.find("\r\n", start) - (start + 6U));
+}
+
+TEST_F(RestApiTest, SendsTheSameTagFromCreateAndRead) {
+  // Arrange
+  const std::string created = create(data().word(6U));
+
+  // Act
+  const std::string read = send({"GET /api/items/1 HTTP/1.1", "", ""});
+
+  // Assert
+  EXPECT_EQ(status_line(created), "HTTP/1.1 201 Created");
+  EXPECT_EQ(etag_of(created).size(), 12U);
+  EXPECT_EQ(etag_of(read), etag_of(created));
+}
+
+TEST_F(RestApiTest, RefusesAReplacementBasedOnAStaleTag) {
+  // Arrange
+  const std::string stale = etag_of(create(data().word(6U)));
+  const std::string patched =
+      send({"PATCH /api/items/1 HTTP/1.1", json_headers(&kToken[0]), R"({"on":false})"});
+
+  // Act
+  const std::string response = send({
+      "PUT /api/items/1 HTTP/1.1",
+      json_headers(&kToken[0]) + "If-Match: " + stale + "\r\n",
+      R"({"name":")" + data().word(5U) + R"(","value":9,"on":true})",
+  });
+
+  // Assert
+  EXPECT_EQ(status_line(patched), "HTTP/1.1 200 OK");
+  EXPECT_NE(etag_of(patched), stale);
+  EXPECT_EQ(status_line(response), "HTTP/1.1 412 Precondition Failed");
+  EXPECT_NE(body_of(send({"GET /api/items/1 HTTP/1.1", "", ""})).find(R"("on":false)"),
+            std::string::npos);
+}
+
+TEST_F(RestApiTest, PatchesWhenIfMatchNamesTheCurrentTag) {
+  // Arrange
+  const std::string tag = etag_of(create(data().word(6U)));
+
+  // Act
+  const std::string response = send({
+      "PATCH /api/items/1 HTTP/1.1",
+      json_headers(&kToken[0]) + "If-Match: " + tag + "\r\n",
+      R"({"value":12})",
+  });
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
+  EXPECT_NE(body_of(response).find(R"("value":12)"), std::string::npos);
+}
+
+TEST_F(RestApiTest, ChangesEveryTagAfterARestart) {
+  // Arrange
+  static_cast<void>(create(data().word(6U)));
+  const std::string before = etag_of(send({"GET /api/items/1 HTTP/1.1", "", ""}));
+  restart(kSession + 1U);
+
+  // Act
+  const std::string after = etag_of(send({"GET /api/items/1 HTTP/1.1", "", ""}));
+
+  // Assert
+  EXPECT_EQ(after.size(), 12U);
+  EXPECT_NE(after, before);
+}
+
+std::string keyed_post(RestApiTest& test, const std::string& key, const std::string& name) {
+  return test.send({
+      "POST /api/items HTTP/1.1",
+      json_headers(&kToken[0]) + "Idempotency-Key: \"" + key + "\"\r\n",
+      R"({"name":")" + name + R"(","value":3,"on":true})",
+  });
+}
+
+TEST_F(RestApiTest, ReplaysARetryWithTheSameKeyAndBody) {
+  // Arrange
+  const std::string key = data().word(20U);
+  const std::string name = data().word(6U);
+  const std::string first = keyed_post(*this, key, name);
+
+  // Act
+  const std::string retry = keyed_post(*this, key, name);
+
+  // Assert
+  EXPECT_EQ(status_line(retry), "HTTP/1.1 201 Created");
+  EXPECT_NE(retry.find("Location: /api/items/1\r\n"), std::string::npos);
+  EXPECT_EQ(body_of(retry), body_of(first));
+  EXPECT_NE(create(data().word(4U)).find("Location: /api/items/2\r\n"), std::string::npos);
+}
+
+TEST_F(RestApiTest, CreatesOneItemForTenIdenticalRetries) {
+  // Arrange
+  const std::string key = data().word(12U);
+  const std::string name = data().word(6U);
+  std::string last;
+
+  // Act
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    last = keyed_post(*this, key, name);
+  }
+
+  // Assert
+  EXPECT_NE(last.find("Location: /api/items/1\r\n"), std::string::npos);
+  EXPECT_NE(create(data().word(4U)).find("Location: /api/items/2\r\n"), std::string::npos);
+}
+
+TEST_F(RestApiTest, ReplaysARetryAfterARestart) {
+  // Arrange
+  const std::string key = data().word(18U);
+  const std::string name = data().word(6U);
+  static_cast<void>(keyed_post(*this, key, name));
+  restart(kSession);
+
+  // Act
+  const std::string retry = keyed_post(*this, key, name);
+
+  // Assert
+  EXPECT_EQ(status_line(retry), "HTTP/1.1 201 Created");
+  EXPECT_NE(retry.find("Location: /api/items/1\r\n"), std::string::npos);
+  EXPECT_EQ(store().files().count("/ITEM2.TXT"), 0U);
+}
+
+TEST_F(RestApiTest, RefusesAKeySentBeforeWithADifferentBody) {
+  // Arrange
+  const std::string key = data().word(16U);
+  static_cast<void>(keyed_post(*this, key, data().word(5U)));
+
+  // Act
+  const std::string response = keyed_post(*this, key, data().word(7U));
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 422 Unprocessable Content");
+}
+
 }

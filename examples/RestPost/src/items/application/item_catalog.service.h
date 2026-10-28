@@ -6,13 +6,16 @@
 
 #include <mado/check.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../domain/item.entity.h"
+#include "../domain/post_record.value.h"
 #include "item_repository.port.h"
+#include "post_ledger.port.h"
 
 namespace items {
 
-enum class AddStatus : uint8_t { kAdded, kInvalid, kFull };
+enum class AddStatus : uint8_t { kAdded, kInvalid, kFull, kReplayed, kKeyReused };
 
 struct AddResult {
   AddStatus status;
@@ -42,11 +45,45 @@ class ItemCatalog {
                                      : AddResult{AddStatus::kFull, Item{}};
   }
 
+  template <typename LedgerT>
+  static AddResult add_once(RepositoryT& repository, LedgerT& ledger, const char* const key,
+                            const ItemDraft& draft) {
+    static_assert(PostLedgerPort<LedgerT>::kSatisfied, "the ledger fits its port");
+    PostRecord known = {};
+    if (!mado::check((key != nullptr) && ledger.recall(key, known))) {
+      return remembered(repository, ledger, key, draft);
+    }
+    if (!mado::check(known.fingerprint == draft_fingerprint(draft))) {
+      return AddResult{AddStatus::kKeyReused, Item{}};
+    }
+    const ItemLookup stored = find(repository, known.item_id);
+    return mado::check(stored.found) ? AddResult{AddStatus::kReplayed, stored.item}
+                                     : AddResult{AddStatus::kKeyReused, Item{}};
+  }
+
   static ItemLookup find(const RepositoryT& repository, const uint8_t item_id) {
     ItemLookup lookup = {false, Item{}};
     lookup.found = mado::check(is_item_id(item_id)) && repository.find(item_id, lookup.item);
     const bool same = mado::check((!lookup.found) || (lookup.item.id == item_id));
     return same ? lookup : ItemLookup{false, Item{}};
+  }
+
+ private:
+  template <typename LedgerT>
+  static AddResult remembered(RepositoryT& repository, LedgerT& ledger, const char* const key,
+                              const ItemDraft& draft) {
+    const AddResult added = add(repository, draft);
+    const bool keyed = (key != nullptr) && (key[0] != '\0');
+    if (!(keyed && mado::check(added.status == AddStatus::kAdded))) {
+      return added;
+    }
+    PostRecord record = {};
+    static_cast<void>(strncpy(&record.key[0], key, kKeySize - 1U));
+    record.fingerprint = draft_fingerprint(draft);
+    record.item_id = added.item.id;
+    const bool kept = mado::check(ledger.remember(record));
+    static_cast<void>(kept);
+    return added;
   }
 };
 

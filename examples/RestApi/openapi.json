@@ -164,7 +164,15 @@
         "responses": {
           "201": {
             "description": "Created",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Item" } }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Strong tag of this revision of the item",
+                "schema": { "type": "string" }
+              }
+            }
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "413": { "$ref": "#/components/responses/TooLarge" },
@@ -177,7 +185,16 @@
               "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string", "maxLength": 66 },
+            "description": "A quoted string of 1 to 64 characters; a retry with the same key and body answers 201 with the item the first request created"
+          }
+        ]
       }
     },
     "/api/items/{id}": {
@@ -188,7 +205,15 @@
         "responses": {
           "200": {
             "description": "The item",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Item" } }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Strong tag of this revision of the item",
+                "schema": { "type": "string" }
+              }
+            }
           },
           "404": { "$ref": "#/components/responses/NotFound" }
         }
@@ -204,15 +229,38 @@
         "responses": {
           "200": {
             "description": "Replaced",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Item" } }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Strong tag of this revision of the item",
+                "schema": { "type": "string" }
+              }
+            }
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "413": { "$ref": "#/components/responses/TooLarge" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "415": { "$ref": "#/components/responses/Unsupported" },
-          "422": { "$ref": "#/components/responses/Invalid" }
-        }
+          "422": { "$ref": "#/components/responses/Invalid" },
+          "412": {
+            "description": "If-Match names a tag the item no longer has",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "The strong ETag from an earlier response; the write is refused with 412 when the item changed since"
+          }
+        ]
       },
       "patch": {
         "operationId": "updateItem",
@@ -227,15 +275,38 @@
         "responses": {
           "200": {
             "description": "Updated",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Item" } }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Strong tag of this revision of the item",
+                "schema": { "type": "string" }
+              }
+            }
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "413": { "$ref": "#/components/responses/TooLarge" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "415": { "$ref": "#/components/responses/Unsupported" },
-          "422": { "$ref": "#/components/responses/Invalid" }
-        }
+          "422": { "$ref": "#/components/responses/Invalid" },
+          "412": {
+            "description": "If-Match names a tag the item no longer has",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "The strong ETag from an earlier response; the write is refused with 412 when the item changed since"
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteItem",

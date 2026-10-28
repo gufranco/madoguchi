@@ -6,10 +6,12 @@
 
 #include <Arduino.h>
 #include <Madoguchi.h>
+#include <mado/Precondition.h>
 #include <mado/Problem.h>
 #include <mado/Reply.h>
 #include <mado/check.h>
 #include <mado/http_status.h>
+#include <mado/if_match.h>
 #include <mado/send_problem.h>
 #include <stdint.h>
 #include <string.h>
@@ -17,6 +19,7 @@
 #include "../../http/api.generated.h"
 #include "../application/item_catalog.service.h"
 #include "../domain/item.entity.h"
+#include "item.etag.h"
 
 namespace items {
 
@@ -29,7 +32,8 @@ class ItemsController {
  public:
   static bool update(ExchangeT& exchange, RepositoryT& repository, const uint8_t route) {
     const uint8_t item_id = requested_id(exchange, route);
-    if (!mado::check(Catalog::find(repository, item_id).found)) {
+    const ItemLookup current = Catalog::find(repository, item_id);
+    if (!mado::check(current.found)) {
       return missing(exchange);
     }
     rest_patch::ItemPatch body = {};
@@ -38,6 +42,9 @@ class ItemsController {
         rest_patch::read_item_patch_body(exchange, body, present, kMaxBody);
     if (!mado::check(problem.status == mado::http::kNoResponse)) {
       return mado::send_problem(exchange, problem);
+    }
+    if (!mado::check(unchanged(exchange, current.item))) {
+      return mado::send_problem(exchange, stale());
     }
     const ChangeResult result = Catalog::change(repository, item_id, change_of(body, present));
     if (!mado::check(result.status == ChangeOutcome::kChanged)) {
@@ -64,6 +71,21 @@ class ItemsController {
     return change;
   }
 
+  static mado::Problem stale() {
+    return mado::Problem{
+        mado::http::kPreconditionFailed,
+        F("the item changed since the ETag in If-Match"),
+    };
+  }
+
+  static bool unchanged(ExchangeT& exchange, const Item& item) {
+    char tag[kItemTagSize] = {};
+    const bool tagged = mado::check(item_tag(item, tag));
+    const mado::Precondition outcome =
+        mado::if_match(exchange.header(F("If-Match")), tagged ? &tag[0] : nullptr);
+    return mado::check(outcome != mado::Precondition::kFails);
+  }
+
   static mado::Problem refusal(const ChangeOutcome status) {
     const bool refused = mado::check(status != ChangeOutcome::kChanged);
     if (refused && mado::check(status == ChangeOutcome::kNothing)) {
@@ -84,8 +106,12 @@ class ItemsController {
 
   static bool send_item(ExchangeT& exchange, const Item& item) {
     const bool fresh = mado::check(!exchange.status_sent());
+    char tag[kItemTagSize] = {};
+    const bool tagged = mado::check(item_tag(item, tag));
     mado::Reply<ExchangeT> reply(exchange);
-    const bool head = fresh && reply.status(mado::http::kOk).json().no_store().end();
+    const bool head =
+        fresh && tagged &&
+        reply.status(mado::http::kOk).json().no_store().header(F("ETag"), &tag[0]).end();
     return head && mado::check(is_item_id(item.id)) &&
            rest_patch::write_item(exchange, to_dto(item));
   }

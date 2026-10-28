@@ -15,7 +15,7 @@
 | コンポジションルート | [`RestPost.ino`](RestPost.ino)がリポジトリを作り、カードをマウントし、両方をルーターに渡します。 |
 | 契約 | [`openapi.json`](openapi.json)から[`api.generated.h`](src/http/api.generated.h)のルート、ボディのリーダー、JSONの書き出しを生成します。 |
 | エラー | 拒否はすべてRFC 9457のproblemで、`400`、`413`、`415`、`422`、`507`のいずれかです。 |
-| テスト | 3ファイルのホストテスト29件と、カバレッジ100パーセントのページテスト7件。 |
+| テスト | 5ファイルのホストテスト54件と、カバレッジ100パーセントのページテスト7件。 |
 | ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.14個のアサーション。 |
 
 ## アーキテクチャ
@@ -59,6 +59,7 @@ RestPost/
   src/
     http/api.generated.h                   ルート、上限、ボディのリーダー、JSONの書き出し（生成）
     http/api.router.h                      作成のルート、それ以外のパスはカードのページ
+    identity/...                           ログイン。RestAuthと同じコード
     items/domain/item.entity.h             Item、ItemDraft、idの範囲と名前のルール
     items/application/item_repository.port.h   リポジトリが備えるべき呼び出し
     items/application/item_catalog.service.h   ユースケース：add、find
@@ -72,7 +73,7 @@ RestPost/
 
 ## APIエンドポイント
 
-認証が必要なルートはありません。
+ログインを除くすべての`/api`ルートにベアラートークンが必要です。ログインと安全な書き込みの節を参照してください。
 
 | メソッド | エンドポイント | 説明 |
 |:---------|:---------------|:-----|
@@ -125,14 +126,23 @@ RestPost/
 
 | できること | 今はしない理由 | このままのリスク |
 |:-----------|:---------------|:-----------------|
-| POSTの冪等性キー | RAMの4スロットで、再試行のコストは1スロット | 再試行したPOSTが2件目の項目を作る |
 | 項目をカードに保存する | このサンプルはPOSTを示し、永続化はRestApiが示す | 再起動で項目が消える |
 | 読み戻し用のGETルート | 動詞ごとのサンプルは1つの動詞だけを示す | クライアントが項目を見られるのは`201`のボディだけ |
 
 ## 前提
 
-- ネットワークは信頼できる。認証もTLSもない。
+- ネットワークは平文のパスワードとトークンを送れる程度に信頼できる。TLSはない。
 - 同時に扱うクライアントは1つ。`mado::Server`は`loop`ごとに1つの接続に応答する。
+
+## ログインと安全な書き込み
+
+`POST /api/auth/login`を除くすべての`/api`ルートにベアラートークンが必要です。`{"username":"admin","password":"..."}`でログインすると、15分間かつボードが再起動するまで有効なトークンが返ります。トークンがない、署名が違う、古い場合は`WWW-Authenticate: Bearer`付きの`401`を返します。
+
+1つのクライアントアドレスからログインに5回失敗すると、そのアドレスは`429`と`Retry-After`で15分間ロックされ、ほかのアドレスはログインを続けられます。表は4つのアドレスを持ち、4つすべてがロック中の間は新しいアドレスもロックされるので、アドレスを替えてもロックは解けません。 アドレスごとの回数は`/LOGIN.TXT`に書き込まれるので、ロックは再起動後も残ります。
+
+ビルドの前に`python3 -m tools.madogen secrets examples/RestPost --user admin`でアカウントを[`arduino_secrets.h`](arduino_secrets.h)に書き込みます。コミットされているファイルはすべてゼロの仮の値で、ログインには必ず`503`を返します。
+
+`POST`は`Idempotency-Key: "<1から64文字>"`を受け付けます。同じキーと同じボディの再試行は、最初のリクエストが作った項目とともに`201`を返し、同じキーで異なるボディなら`422`を返します。ボードは最後の8つのキーを覚えます。項目と同じくRAMに置きます。
 
 ## テスト
 
@@ -145,7 +155,9 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 |:---------|---------:|:-----|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名前のルール、idの範囲、項目の生成 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、満杯のテーブル、find |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 14 | `201`と`Location`、idの順序、`507`、8種類の拒否されるボディ、空の名前 |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 20 | `201`と`Location`、idの順序、`507`、8種類の拒否されるボディ、空の名前 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROMカウンター、ログイン、カード上のアドレスごとの失敗回数、再起動をまたぐロックアウト、トークンの確認 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 認証情報の規則、セッションカウンター、トークンの終了時刻 |
 
 `cd "SD Card" && pnpm run test`はカバレッジ100パーセントで7件のページテストを実行します。
 
@@ -163,6 +175,7 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 ## はじめに
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestPost --user admin && cd examples/RestPost
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -172,14 +185,15 @@ cd "SD Card" && pnpm install && pnpm run build
 `SD Card/dist`をカードにコピーしてから：
 
 ```bash
-curl -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
 ```
 
 ## 技術スタック
 
 | 分類 | 技術 |
 |:-----|:-----|
-| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中77,032バイト、RAM 32,768バイト中5,904バイト |
+| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中90,816バイト、RAM 32,768バイト中6,928バイト |
 | HTTP | Madoguchi、ヒープを使わないC++11 |
 | カード | SdFat 2.3.0 |
 | ネットワーク | Ethernet 2.0.2 |

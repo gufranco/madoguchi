@@ -25,7 +25,7 @@
 
 ---
 
-Madoguchi 运行在装有 W5x00 或 ENC28J60 扩展板和 SD 卡的 Uno R4 Minima 上，并且完全不在堆上分配内存。C++ 代码中不含任何 HTML、CSS、脚本或图片：所有页面都在卡上，由每个示例各自独立的 Web 项目生成。这些项目用 TypeScript 和无类的 Pico CSS 编写，由 Vite 构建为卡上的文件和 gzip 副本。开发板应答由单个 OpenAPI 文档生成的 REST API，支持 JWT 登录、JSON 请求体和所有 HTTP 方法。每次推送和拉取请求时，CI 都会构建全部 9 个示例，任何超出开发板闪存或 RAM 预算的构建都会失败；同时运行 1,336 个主机测试、91 个工具测试、127 个页面测试和 32 个浏览器测试，构建每张卡，并对解析器进行模糊测试。
+Madoguchi 运行在装有 W5x00 或 ENC28J60 扩展板和 SD 卡的 Uno R4 Minima 上，并且完全不在堆上分配内存。C++ 代码中不含任何 HTML、CSS、脚本或图片：所有页面都在卡上，由每个示例各自独立的 Web 项目生成。这些项目用 TypeScript 和无类的 Pico CSS 编写，由 Vite 构建为卡上的文件和 gzip 副本。开发板应答由单个 OpenAPI 文档生成的 REST API，支持 JWT 登录、JSON 请求体和所有 HTTP 方法。每次推送和拉取请求时，CI 都会构建全部 9 个示例，任何超出开发板闪存或 RAM 预算的构建都会失败；同时运行 1,546 个主机测试、91 个工具测试、135 个页面测试和 32 个浏览器测试，构建每张卡，并对解析器进行模糊测试。
 
 名字来自日语的「窓口」，即递交请求、拿回答复的服务窗口。
 
@@ -157,15 +157,15 @@ Madoguchi 只支持一块开发板：搭载 Renesas RA4M1 的 Arduino Uno R4 Min
 
 | 示例 | 演示内容 | 闪存，共 262,144 | 已用 RAM，共 32,768 |
 |:--------|:------|------:|------:|
-| [`RestGet`](examples/RestGet/RestGet.ino) | 条目列表和单个条目的 `GET` | 74,764 | 5,904 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | 以 JSON 新建条目的 `POST` | 77,032 | 5,904 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | 替换条目的 `PUT` | 77,656 | 5,904 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 修改条目部分字段的 `PATCH` | 77,692 | 5,904 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | 按 id 删除条目的 `DELETE` | 73,856 | 5,904 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | 登录和一个受保护的路由 | 87,496 | 6,184 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD 上的文件：列出、下载、范围请求、带进度的上传、删除 | 94,472 | 6,944 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | 完整的 API、其网站、Swagger UI 和请求日志 | 107,364 | 6,648 |
-| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 用 0x00 和 0xFF 擦除并校验，再格式化为 FAT16、FAT32 或 exFAT；只有 JSON | 71,852 | 9,936 |
+| [`RestGet`](examples/RestGet/RestGet.ino) | 条目列表和单个条目的 `GET` | 89,612 | 6,312 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | 以 JSON 新建条目的 `POST` | 90,816 | 6,928 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | 替换条目的 `PUT` | 91,652 | 6,332 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 修改条目部分字段的 `PATCH` | 91,656 | 6,332 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | 按 id 删除条目的 `DELETE` | 89,076 | 6,312 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | 登录和一个受保护的路由 | 88,324 | 6,224 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD 上的文件：列出、下载、范围请求、带进度的上传、删除 | 104,108 | 7,048 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | 完整的 API、其网站、Swagger UI 和请求日志 | 110,600 | 7,328 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 用 0x00 和 0xFF 擦除并校验，再格式化为 FAT16、FAT32 或 exFAT；只有 JSON | 92,456 | 10,344 |
 
 除 RestFormat 外，每个示例都从卡上应答 `/api/openapi.json`，并在 `/docs/` 提供 Swagger UI。构建超出开发板预算时，CI 会失败。
 
@@ -337,7 +337,7 @@ const bool spec = mado::serve_card_path<FILE_READ>(exchange, sd_card, &kSpecPath
 
 `serve_card_file()` 在卡上解析请求路径：试图跳出根目录的路径返回 `400`，不存在的文件或文件夹返回 `404`，浏览器接受 gzip 时发送文件旁边的 `.gz` 副本。由 8 位十六进制数字加扩展名组成的名称，例如 `9f86d081.js`，以 `public, max-age=31536000, immutable` 缓存；其他文件一律为 `no-cache`。`serve_card_path()` 提供一个固定文件，`/api/openapi.json` 就是这样返回 `/openapi.json` 的。
 
-对于下载、范围请求和条件请求，把包含大小、类型、gzip 标志、ETag、下载文件名和 `Cache-Control` 值的 `mado::FileReply` 传给 `mado::send_file()`。`mado::file_etag()` 由文件名、大小和一个版本号生成弱 ETag，程序在每次写入和启动时都会更改该版本号，因此即使用相同大小的文件替换，也会得到新的标签。带 `If-Range` 的 `Range` 会得到整个文件，因为弱标签无法证明各部分属于同一版本。[`RestFiles`](examples/RestFiles/RestFiles.ino) 用到了以上全部功能。
+对于下载、范围请求和条件请求，把包含大小、类型、gzip 标志、ETag、下载文件名和 `Cache-Control` 值的 `mado::FileReply` 传给 `mado::send_file()`。`mado::file_etag()` 由文件名、大小和一个版本号生成弱 ETag，程序在每次写入和启动时都会更改该版本号，因此即使用相同大小的文件替换，也会得到新的标签。在弱标签下，带 `If-Range` 的 `Range` 会得到整个文件，因为弱标签无法证明各部分属于同一版本。[`RestFiles`](examples/RestFiles/RestFiles.ino) 发送同一标签的强形式，由于版本在每次写入、删除和重新挂载时都会改变，这样做是成立的，所以它的范围请求可以续传；`PUT` 替换文件前，`mado::if_match()` 会比较这个强标签。
 
 ### Basic 认证
 
@@ -492,11 +492,11 @@ curl -s -H "Authorization: Bearer $TOKEN" http://madoguchi.local/api/log | jq -c
 | `POST /api/items`、`PUT`、`PATCH`、`DELETE /api/items/{id}` | 修改，需要 Bearer 令牌 |
 | `GET /api/log`、`DELETE /api/log` | JSON 行格式的请求日志，可用 `Range` 读取末尾，以及清空日志，需要 Bearer 令牌 |
 
-[`RestAuth`](examples/RestAuth/RestAuth.ino) 演示登录和一个受保护的路由。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino) 和 [`RestDelete`](examples/RestDelete/RestDelete.ino) 各自演示一种不带认证的方法。[`RestFiles`](examples/RestFiles/RestFiles.ino) 列出、下载、带进度条上传和删除 SD 卡上的文件；它没有认证，因此只应在可信网络中使用。它们都把应用代码放在程序旁边的头文件中，因此主机测试运行的就是开发板运行的代码；没有卡时，它们返回带问题文档的 `503`。
+[`RestAuth`](examples/RestAuth/RestAuth.ino) 演示登录和一个受保护的路由。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino) 和 [`RestDelete`](examples/RestDelete/RestDelete.ino) 各自在同样的登录之后演示一种方法：除 `POST /api/auth/login` 外，每个 `/api` 路由都需要持有者令牌。[`RestFiles`](examples/RestFiles/RestFiles.ino) 列出、下载、带进度条上传和删除 SD 卡上的文件；列出和下载是公开的，上传和删除需要令牌。它们都把应用代码按层放在 `src/` 下，所以主机测试运行的就是开发板运行的代码，没有卡时会应答带问题文档的 `503`。每个登录都只在某个客户端地址失败五次后锁定该地址，其他地址仍可使用。
 
 ### 擦除并格式化 SD 卡
 
-[`RestFormat`](examples/RestFormat/RestFormat.ino) 为其他所有示例准备 SD 卡。它只应答 JSON，没有页面也没有登录，因此只应在可信网络中使用。它会擦除卡上的全部内容。
+[`RestFormat`](examples/RestFormat/RestFormat.ino) 为其他所有示例准备 SD 卡。它只应答 JSON，没有页面，每个路由都需要来自 `POST /api/auth/login` 的持有者令牌。它会擦除卡上的全部内容。
 
 | 路由 | 作用 |
 |:------|:-----|
@@ -578,10 +578,10 @@ python3 -m tools.madogen secrets examples/RestApi --user admin
 
 | 测试集 | 命令 | 覆盖范围 |
 |:------|:--------|:-------|
-| 库和示例 | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,336 个测试：RFC 9112 一致性表、解析、路由、响应、卡上的文件、范围请求、网络辅助函数、SD 日志、加密、令牌、示例的应用代码，以及每个模糊测试语料库的重放 |
+| 库和示例 | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,546 个测试：RFC 9112 一致性表、解析、路由、响应、卡上的文件、范围请求、网络辅助函数、SD 日志、加密、令牌、示例的应用代码，以及每个模糊测试语料库的重放 |
 | 覆盖率 | `gcovr build --root . --filter src/ --merge-lines --txt` | `src/` 的行和函数覆盖率，CI 中下限为 95% |
 | 生成器和门禁 | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen`、断言密度门禁、大小门禁和吞吐量工具的 91 个测试 |
-| 页面 | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | 依赖审计、Biome、TypeScript、html-validate、127 个带 95% 覆盖率门禁的 Vitest 测试，以及每张卡的构建 |
+| 页面 | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | 依赖审计、Biome、TypeScript、html-validate、135 个带 95% 覆盖率门禁的 Vitest 测试，以及每张卡的构建 |
 | 浏览器 | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | 32 个 Playwright 测试：以 320 px 和桌面宽度测试每个页面和文档页 |
 | 吞吐量 | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | 测量开发板的下载和上传速度，以 JSON 输出 |
 | 生成代码 | `python3 -m tools.madogen check examples/Rest*` | `src/http/api.generated.h` 与源文件一致，且未提交真实密钥 |

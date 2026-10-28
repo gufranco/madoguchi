@@ -10,10 +10,16 @@
 #include "../src/card/domain/format_phase.entity.h"
 #include "../src/http/api.generated.h"
 #include "../src/http/api.router.h"
+#include "../src/identity/adapters/card_failure.store.h"
+#include "../src/identity/adapters/flash_secrets.authority.h"
+#include "../src/identity/application/access.service.h"
 #include "FakeClient.h"
 #include "FakeClock.h"
 #include "FakeData.h"
+#include "FakeSd.h"
 #include "FakeSectorCard.h"
+#include "TestAccess.h"
+#include "TestSecrets.h"
 
 namespace {
 
@@ -25,6 +31,11 @@ constexpr uint8_t kSdsc = 2U;
 constexpr uint8_t kSdhc = 3U;
 constexpr uint32_t kSmallCard = 4100U;
 constexpr uint32_t kMaxSteps = 100000UL;
+
+std::string login_body_of(const std::string& response) {
+  const size_t split = response.find("\r\n\r\n");
+  return (split == std::string::npos) ? "" : response.substr(split + 4U);
+}
 
 class DriverControls {
  public:
@@ -94,7 +105,11 @@ struct FakeDriver {
 };
 
 using Service = card::FormatService<FakeDriver>;
-using App = api::Router<FakeClient, Service>;
+using Authority = identity::FlashSecretsAuthority<test_secrets::TestSecrets>;
+using Failures = identity::CardFailureLog<FakeSd, FILE_READ, FILE_WRITE>;
+using Access = identity::AccessService<Authority, Failures>;
+using Gatekeeper = TestAccess<Authority, Failures, Access>;
+using App = api::Router<FakeClient, Access, Service>;
 using AppServer = mado::Server<FakeClient, App, rest_format::Limits>;
 
 std::string body_of(const std::string& response) {
@@ -108,17 +123,23 @@ std::string status_line(const std::string& response) {
 
 class RestFormatTest : public ::testing::Test {
  public:
+  std::string raw(const std::string& wire) {
+    FakeClient client(wire);
+    server_.process(client);
+    return client.output();
+  }
+
   std::string get(const std::string& path) {
-    FakeClient client("GET " + path + " HTTP/1.1\r\nHost: mado.test\r\n\r\n");
+    FakeClient client("GET " + path + " HTTP/1.1\r\nHost: mado.test\r\n" + bearer() + "\r\n");
     server_.process(client);
     return client.output();
   }
 
   std::string start(const std::string& body) {
-    FakeClient client(
-        "POST /api/card/format HTTP/1.1\r\nHost: mado.test\r\nContent-Type: application/json\r\n"
-        "Content-Length: " +
-        std::to_string(body.size()) + "\r\n\r\n" + body);
+    FakeClient client("POST /api/card/format HTTP/1.1\r\nHost: mado.test\r\n" + bearer() +
+                      "Content-Type: application/json\r\n"
+                      "Content-Length: " +
+                      std::to_string(body.size()) + "\r\n\r\n" + body);
     server_.process(client);
     return client.output();
   }
@@ -158,6 +179,8 @@ class RestFormatTest : public ::testing::Test {
     controls_ = DriverControls{};
     FakeDriver::controls() = &controls_;
     static_cast<void>(service_.begin());
+    Gatekeeper& keeper = fresh_gatekeeper<Gatekeeper>();
+    App::attach_access(keeper.access, keeper.clock);
     App::attach(service_);
   }
 
@@ -505,6 +528,34 @@ TEST_F(RestFormatTest, StepsDoNothingWhileIdle) {
   // Assert
   EXPECT_EQ(card.writes(), 0U);
   EXPECT_EQ(card.reads(), 0U);
+}
+
+TEST_F(RestFormatTest, RefusesAnApiRequestWithoutAToken) {
+  // Arrange
+  const std::string wire = "GET /api/card HTTP/1.1\r\nHost: mado.test\r\n\r\n";
+
+  // Act
+  const std::string response = raw(wire);
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 401 Unauthorized");
+  EXPECT_NE(response.find("WWW-Authenticate: Bearer"), std::string::npos);
+}
+
+TEST_F(RestFormatTest, IssuesATokenForTheRightPassword) {
+  // Arrange
+  const std::string body =
+      std::string(R"({"username":"admin","password":")") + test_secrets::kPassword + R"("})";
+
+  // Act
+  const std::string response =
+      raw("POST /api/auth/login HTTP/1.1\r\nHost: mado.test\r\nContent-Type: application/json\r\n"
+          "Content-Length: " +
+          std::to_string(body.size()) + "\r\n\r\n" + body);
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
+  EXPECT_NE(login_body_of(response).find(R"("token_type":"Bearer")"), std::string::npos);
 }
 
 }

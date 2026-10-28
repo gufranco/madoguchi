@@ -12,6 +12,8 @@
 
 namespace {
 
+constexpr uint32_t kSession = 41U;
+
 using Repository = items::CardItemRepository<FakeSd, FILE_READ, FILE_WRITE>;
 using Catalog = items::ItemCatalog<Repository>;
 
@@ -45,7 +47,7 @@ class ItemsRepositoryTest : public ::testing::Test {
 
 TEST_F(ItemsRepositoryTest, WritesAnAddedItemToItsOwnFile) {
   // Arrange
-  static_cast<void>(repository().attach(&card()));
+  static_cast<void>(repository().attach(&card(), kSession));
   const std::string name = data().word(5U);
 
   // Act
@@ -63,7 +65,7 @@ TEST_F(ItemsRepositoryTest, LoadsWhatAnEarlierBootSaved) {
   card().files()["/ITEM2.TXT"] = "{\"name\":\"fan\",\"value\":-4,\"on\":false}\n";
 
   // Act
-  const uint8_t loaded = repository().attach(&card());
+  const uint8_t loaded = repository().attach(&card(), kSession);
 
   // Assert
   EXPECT_EQ(loaded, 1U);
@@ -72,7 +74,7 @@ TEST_F(ItemsRepositoryTest, LoadsWhatAnEarlierBootSaved) {
 
 TEST_F(ItemsRepositoryTest, ForgetsTheFileOfARemovedItem) {
   // Arrange
-  static_cast<void>(repository().attach(&card()));
+  static_cast<void>(repository().attach(&card(), kSession));
   static_cast<void>(Catalog::add(repository(), draft_named(data().word(4U), 1)));
 
   // Act
@@ -85,7 +87,7 @@ TEST_F(ItemsRepositoryTest, ForgetsTheFileOfARemovedItem) {
 
 TEST_F(ItemsRepositoryTest, ReportsASaveTheCardRefused) {
   // Arrange
-  static_cast<void>(repository().attach(&card()));
+  static_cast<void>(repository().attach(&card(), kSession));
   card().limit_writes(4U);
 
   // Act
@@ -98,7 +100,7 @@ TEST_F(ItemsRepositoryTest, ReportsASaveTheCardRefused) {
 
 TEST_F(ItemsRepositoryTest, KeepsItemsInMemoryWithoutACard) {
   // Arrange
-  static_cast<void>(repository().attach(nullptr));
+  static_cast<void>(repository().attach(nullptr, kSession));
 
   // Act
   const items::Result result = Catalog::add(repository(), draft_named(data().word(4U), 1));

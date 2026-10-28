@@ -78,3 +78,15 @@ export function fakeBoard(page: string, answers: readonly Response[]): FakeBoard
     },
   };
 }
+
+export const TEST_TOKEN = "eyJ0ZXN0IjoidG9rZW4ifQ.e30.c2lnbmF0dXJl";
+
+export function tokenAnswer(): Response {
+  return answer(200, { access_token: TEST_TOKEN, token_type: "Bearer", expires_in: 900 });
+}
+
+export function signInOn(board: FakeBoard): void {
+  board.input("username").value = "admin";
+  board.input("password").value = "correct-horse-battery";
+  board.submit("#login");
+}

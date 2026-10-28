@@ -1,21 +1,32 @@
 // SPDX-FileCopyrightText: 2026 Gustavo Franco
 // SPDX-License-Identifier: MIT
 
+#include <EEPROM.h>
 #include <Ethernet.h>
 #include <Madoguchi.h>
 #include <SPI.h>
+#include <mado/UptimeClock.h>
 
+#include "arduino_secrets.h"
 #include "src/http/api.generated.h"
 #include "src/http/api.router.h"
+#include "src/identity/adapters/card_failure.store.h"
+#include "src/identity/adapters/eeprom_session.counter.h"
+#include "src/identity/adapters/flash_secrets.authority.h"
+#include "src/identity/application/access.service.h"
 #include "src/items/adapters/ram_item.repository.h"
 #include "src/items/application/item_catalog.service.h"
 
 #include <SdFat.h>
 
 using Catalog = items::ItemCatalog<items::RamItemRepository>;
-using WebApp = api::Router<EthernetClient, items::RamItemRepository, SdFs, FILE_READ>;
+using Authority = identity::FlashSecretsAuthority<secrets::Provisioned>;
+using Failures = identity::CardFailureLog<SdFs, FILE_READ, FILE_WRITE>;
+using Access = identity::AccessService<Authority, Failures>;
+using WebApp = api::Router<EthernetClient, Access, items::RamItemRepository, SdFs, FILE_READ>;
 
 constexpr uint8_t kSdChipSelect = 4U;
+constexpr uint8_t kEntropyPins = 6U;
 
 SdFs sd_card;
 items::RamItemRepository repository;
@@ -25,6 +36,15 @@ EthernetServer ethernet_server(80);
 mado::Server<EthernetClient, WebApp, rest_patch::Limits> web(&rest_patch::kRoutes[0],
                                                              &rest_patch::kHeaderNames[0]);
 
+uint32_t entropy() {
+  uint32_t mixed = micros();
+  for (uint8_t pin = 0U; pin < kEntropyPins; ++pin) {
+    const uint32_t noise = static_cast<uint32_t>(analogRead(A0 + pin));
+    mixed = (mixed << 5U) ^ (mixed >> 27U) ^ noise;
+  }
+  return mixed;
+}
+
 void seed_items() {
   const items::AddResult lamp = Catalog::add(repository, items::ItemDraft{"lamp", true});
   const items::AddResult fan = Catalog::add(repository, items::ItemDraft{"fan", false});
@@ -32,9 +52,18 @@ void seed_items() {
   static_cast<void>(fan);
 }
 
+Authority authority;
+mado::UptimeClock uptime;
+identity::EepromSessionCounter<decltype(EEPROM)> sessions(EEPROM);
+
 void setup() {
+  repository.begin(entropy() | 1U);
   seed_items();
   const bool card_ready = sd_card.begin(kSdChipSelect);
+  static Failures failures(card_ready ? &sd_card : nullptr);
+  static Access access(authority, failures);
+  access.begin(sessions.advance());
+  WebApp::attach_access(access, uptime);
   WebApp::attach(repository, card_ready ? &sd_card : nullptr);
   Ethernet.begin(mac_address, IPAddress(192, 168, 1, 177));
   ethernet_server.begin();

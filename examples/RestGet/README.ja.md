@@ -15,8 +15,8 @@
 | 契約 | [`openapi.json`](openapi.json)が[`api.generated.h`](src/http/api.generated.h)のルート、ワイヤー構造体、JSON書き出しの元になります。 |
 | エラー | 存在しないidはRFC 9457のproblemで`404`を返します。カードがなければ`503`を返します。 |
 | ページ | `SD Card`はViteとTypeScriptのプロジェクトで、同じ分け方をしています。`domain`、ポートを持つ`application`、`adapters/http`、`adapters/dom`です。 |
-| テスト | 3ファイルのホストテスト26件と、カバレッジ100パーセントのページテスト9件。 |
-| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、すべてのループに上限あり、関数あたり2.06個のアサーション。 |
+| テスト | 5ファイルのホストテスト47件と、カバレッジ100パーセントのページテスト9件。 |
+| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、すべてのループに上限あり、関数あたり2.02個のアサーション。 |
 
 ## アーキテクチャ
 
@@ -61,6 +61,7 @@ RestGet/
     http/
       api.generated.h                      ルート、上限、ワイヤー構造体、JSON書き出し（生成）
       api.router.h                         ルートidからコントローラーへ、それ以外のパスはカードのページ
+    identity/                              ログイン。RestAuthと同じコード
     items/
       domain/item.entity.h                 Item、ItemDraft、idの範囲と名前のルール
       application/item_repository.port.h   リポジトリが備えるべき呼び出し
@@ -75,7 +76,7 @@ RestGet/
 
 ## APIエンドポイント
 
-認証が必要なルートはありません。
+ログインを除くすべての`/api`ルートにベアラートークンが必要です。ログインと安全な書き込みの節を参照してください。
 
 | メソッド | エンドポイント | 説明 |
 |:---------|:---------------|:-----|
@@ -131,9 +132,17 @@ RestGet/
 
 ## 前提
 
-- ネットワークは信頼できる。認証もTLSもない。
+- ネットワークは平文のパスワードとトークンを送れる程度に信頼できる。TLSはない。
 - 同時に扱うクライアントは1つ。`mado::Server`は`loop`ごとに1つの接続に応答する。
 - SDカードには`pnpm run build`が`SD Card/dist`に書き出したファイルが入っている。
+
+## ログインと安全な書き込み
+
+`POST /api/auth/login`を除くすべての`/api`ルートにベアラートークンが必要です。`{"username":"admin","password":"..."}`でログインすると、15分間かつボードが再起動するまで有効なトークンが返ります。トークンがない、署名が違う、古い場合は`WWW-Authenticate: Bearer`付きの`401`を返します。
+
+1つのクライアントアドレスからログインに5回失敗すると、そのアドレスは`429`と`Retry-After`で15分間ロックされ、ほかのアドレスはログインを続けられます。表は4つのアドレスを持ち、4つすべてがロック中の間は新しいアドレスもロックされるので、アドレスを替えてもロックは解けません。 アドレスごとの回数は`/LOGIN.TXT`に書き込まれるので、ロックは再起動後も残ります。
+
+ビルドの前に`python3 -m tools.madogen secrets examples/RestGet --user admin`でアカウントを[`arduino_secrets.h`](arduino_secrets.h)に書き込みます。コミットされているファイルはすべてゼロの仮の値で、ログインには必ず`503`を返します。
 
 ## テスト
 
@@ -148,7 +157,9 @@ ctest --test-dir build -R '^RestGet\.' --output-on-failure
 |:---------|---------:|:-----|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名前のルール、idの範囲、ドラフトからの項目の生成 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、満杯のテーブル、範囲内と範囲外のfind |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 11 | 一覧、読み出し、HEAD、3種類の存在しないid、405、仕様書、ページ、カードなし |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 13 | 一覧、読み出し、HEAD、3種類の存在しないid、405、仕様書、ページ、カードなし |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROMカウンター、ログイン、カード上のアドレスごとの失敗回数、再起動をまたぐロックアウト、トークンの確認 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 認証情報の規則、セッションカウンター、トークンの終了時刻 |
 
 ページテストはVitestとhappy-domで動きます。`cd "SD Card" && pnpm run test`は9件のテストを、文、分岐、関数、行のカバレッジ100パーセントで実行します。
 
@@ -166,6 +177,7 @@ ctest --test-dir build -R '^RestGet\.' --output-on-failure
 ## はじめに
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestGet --user admin && cd examples/RestGet
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -175,7 +187,8 @@ cd "SD Card" && pnpm install && pnpm run build
 `SD Card/dist`の中身をFAT32またはexFATのカードのルートにコピーし、シールドに挿して`http://192.168.1.177/`を開きます。
 
 ```bash
-curl http://192.168.1.177/api/items/1
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/items/1
 ```
 
 ```json
@@ -186,7 +199,7 @@ curl http://192.168.1.177/api/items/1
 
 | 分類 | 技術 |
 |:-----|:-----|
-| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中74,764バイト、RAM 32,768バイト中5,904バイト |
+| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中89,612バイト、RAM 32,768バイト中6,312バイト |
 | HTTP | Madoguchi、ヒープを使わないC++11 |
 | カード | SdFat 2.3.0 |
 | ネットワーク | Ethernet 2.0.2 |

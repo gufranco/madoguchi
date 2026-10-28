@@ -15,8 +15,8 @@
 | 轉接器 | `FlashSecretsAuthority` 從快閃記憶體讀取密鑰、鹽及雜湊；`CardFailureLog` 把失敗次數保存在記憶卡上；`EepromSessionCounter` 記錄啟動次數；兩個控制器負責 HTTP。 |
 | 組合根 | [`RestAuth.ino`](RestAuth.ino) 掛載記憶卡、建立轉接器及服務，並從 EEPROM 開始一個新工作階段。 |
 | 安全 | 常數時間比較；連續五次失敗後鎖定 15 分鐘，重啟後依然有效；權杖在下次啟動時失效。 |
-| 測試 | 三個檔案中的 26 個主機測試，以及覆蓋率 100% 的 6 個頁面測試。 |
-| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個函式平均 2.02 個斷言。 |
+| 測試 | 三個檔案中的 28 個主機測試，以及覆蓋率 100% 的 6 個頁面測試。 |
+| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個函式平均 2.09 個斷言。 |
 
 ## 架構
 
@@ -124,12 +124,15 @@ RestAuth/
 |:-----------|:---------------|:-----------------|
 | TLS | 開發板沒有 TLS 協定堆疊 | 憑證及權杖以明文在網絡上傳送 |
 | 多個用戶 | 一個用戶足以示範 | 所有人共用一個帳戶 |
-| 按客戶端位址鎖定 | 單一計數器較簡單 | 一個攻擊者就能把主人鎖在外面 15 分鐘 |
 
 ## 假設
 
 - 網絡足夠可信，可以傳送明文密碼。
 - [`arduino_secrets.h`](arduino_secrets.h) 以 `python3 -m tools.madogen secrets examples/RestAuth --user admin` 產生，真正的檔案從不提交。
+
+## 登入及安全寫入
+
+同一客戶端位址登入失敗五次，該位址會以 `429` 及 `Retry-After` 鎖定 15 分鐘，其他位址仍可登入。表中保存四個位址，四個都被鎖定時新位址亦被鎖定，所以輪換位址無法解除鎖定。 每個位址的次數寫入 `/LOGIN.TXT`，所以鎖定在重啟後依然有效。
 
 ## 測試
 
@@ -141,7 +144,7 @@ ctest --test-dir build -R '^RestAuth\.' --output-on-failure
 | 檔案 | 測試數目 | 涵蓋內容 |
 |:-----|------:|:---------|
 | [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 12 | 憑證規則、工作階段計數器的五種情況、權杖結束時間、問候 |
-| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 7 | EEPROM 計數器、登入、記憶卡上的失敗次數、跨重啟的鎖定、權杖檢查 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 計數器、登入、記憶卡上的失敗次數、跨重啟的鎖定、權杖檢查 |
 | [`auth.api.test.cpp`](tests/auth.api.test.cpp) | 7 | 登入、錯誤密碼、鎖定、問候、缺少、被竄改及過期的權杖 |
 
 `cd "SD Card" && pnpm run test` 以 100% 覆蓋率執行 6 個頁面測試。頁面只在記憶體中保存權杖。
@@ -177,7 +180,7 @@ curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/greeting
 
 | 類別 | 技術 |
 |:-----|:-----|
-| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 87,496 位元組，RAM 32,768 位元組中用 6,184 位元組 |
+| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 88,324 位元組，RAM 32,768 位元組中用 6,224 位元組 |
 | HTTP 及認證 | Madoguchi：HS256、PBKDF2-HMAC-SHA256、`LoginGuard` |
 | 記憶卡 | SdFat 2.3.0 |
 | 網絡 | Ethernet 2.0.2 |

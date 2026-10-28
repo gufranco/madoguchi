@@ -102,4 +102,26 @@ TEST_F(ItemsDomainTest, RefusesAChangeThatEmptiesTheName) {
   EXPECT_EQ(status, items::ChangeStatus::kInvalid);
 }
 
+TEST(ItemRevision, SpreadsTheFirstRevisionOfEachSession) {
+  // Arrange
+  const uint32_t session = 1U;
+
+  // Act
+  const uint32_t first = items::first_revision(session);
+
+  // Assert
+  EXPECT_EQ(first, 0x9E3779B1UL);
+}
+
+TEST(ItemRevision, WrapsToOneInsteadOfZero) {
+  // Arrange
+  const uint32_t last = UINT32_MAX;
+
+  // Act
+  const uint32_t next = items::next_revision(last);
+
+  // Assert
+  EXPECT_EQ(next, 1U);
+}
+
 }

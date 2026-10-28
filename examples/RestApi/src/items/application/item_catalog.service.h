@@ -6,13 +6,16 @@
 
 #include <mado/check.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../domain/item.entity.h"
+#include "../domain/post_record.value.h"
 #include "item_repository.port.h"
+#include "post_ledger.port.h"
 
 namespace items {
 
-enum class Outcome : uint8_t { kDone, kMissing, kInvalid, kNothing, kFull };
+enum class Outcome : uint8_t { kDone, kMissing, kInvalid, kNothing, kFull, kReplayed, kKeyReused };
 
 struct Result {
   Outcome outcome;
@@ -39,6 +42,22 @@ class ItemCatalog {
     const ItemLookup stored = mado::check(written.done) ? find(repository, item_id) : ItemLookup{};
     return mado::check(stored.found) ? Result{Outcome::kDone, stored.item, written.saved}
                                      : Result{Outcome::kFull, Item{}, true};
+  }
+
+  template <typename LedgerT>
+  static Result add_once(RepositoryT& repository, LedgerT& ledger, const char* const key,
+                         const ItemDraft& draft) {
+    static_assert(PostLedgerPort<LedgerT>::kSatisfied, "the ledger fits its port");
+    PostRecord known = {};
+    if (!mado::check((key != nullptr) && ledger.recall(key, known))) {
+      return remembered(repository, ledger, key, draft);
+    }
+    if (!mado::check(known.fingerprint == draft_fingerprint(draft))) {
+      return Result{Outcome::kKeyReused, Item{}, true};
+    }
+    const ItemLookup stored = find(repository, known.item_id);
+    return mado::check(stored.found) ? Result{Outcome::kReplayed, stored.item, true}
+                                     : Result{Outcome::kKeyReused, Item{}, true};
   }
 
   static ItemLookup find(const RepositoryT& repository, const uint8_t item_id) {
@@ -81,10 +100,27 @@ class ItemCatalog {
   }
 
  private:
+  template <typename LedgerT>
+  static Result remembered(RepositoryT& repository, LedgerT& ledger, const char* const key,
+                           const ItemDraft& draft) {
+    const Result added = add(repository, draft);
+    const bool keyed = (key != nullptr) && (key[0] != '\0');
+    if (!(keyed && mado::check(added.outcome == Outcome::kDone))) {
+      return added;
+    }
+    PostRecord record = {};
+    static_cast<void>(strncpy(&record.key[0], key, kKeySize - 1U));
+    record.fingerprint = draft_fingerprint(draft);
+    record.item_id = added.item.id;
+    const bool kept = mado::check(ledger.remember(record));
+    return Result{added.outcome, added.item, added.saved && kept};
+  }
+
   static Result keep(RepositoryT& repository, const Item& next) {
     const bool numbered = mado::check(is_item_id(next.id));
     const Written written = numbered ? repository.store(next) : Written{false, true};
-    return mado::check(written.done) ? Result{Outcome::kDone, next, written.saved}
+    const ItemLookup stored = mado::check(written.done) ? find(repository, next.id) : ItemLookup{};
+    return mado::check(stored.found) ? Result{Outcome::kDone, stored.item, written.saved}
                                      : Result{Outcome::kMissing, Item{}, true};
   }
 };

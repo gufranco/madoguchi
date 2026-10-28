@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { faker } from "@faker-js/faker";
-import { answer, fakeBoard, problem } from "@madoguchi/kit/testing";
+import { answer, fakeBoard, problem, signInOn, tokenAnswer } from "@madoguchi/kit/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { start } from "./app.ts";
@@ -34,17 +34,19 @@ describe("RestPatch page", () => {
   it("changes the chosen item", async () => {
     // Arrange
     const name = faker.word.noun().slice(0, 16);
-    const board = fakeBoard(PAGE, [answer(200, { id: 2, name, on: true })]);
+    const board = fakeBoard(PAGE, [tokenAnswer(), answer(200, { id: 2, name, on: true })]);
     start(board.host);
+    signInOn(board);
+    await expect.poll(() => board.text(STATUS)).toBe("Signed in.");
     board.input("item-id").value = "2";
     board.input("item-name").value = name;
 
     // Act
-    board.submit("form");
+    board.submit("#change");
 
     // Assert
     await expect.poll(() => board.text(STATUS)).toBe("Changed item 2.");
-    const [call] = board.calls();
+    const [, call] = board.calls();
     expect(`${call?.method} ${call?.path}`).toBe("PATCH /api/items/2");
     expect(JSON.parse(String(call?.body))).toEqual({ name });
     expect(board.text("#result")).toBe(`#2 ${name}: on`);
@@ -52,26 +54,30 @@ describe("RestPatch page", () => {
 
   it("asks for a change before sending", async () => {
     // Arrange
-    const board = fakeBoard(PAGE, []);
+    const board = fakeBoard(PAGE, [tokenAnswer()]);
     start(board.host);
+    signInOn(board);
+    await expect.poll(() => board.text(STATUS)).toBe("Signed in.");
 
     // Act
-    board.submit("form");
+    board.submit("#change");
 
     // Assert
     await expect.poll(() => board.text(STATUS)).toBe("Fill in a new name or pick a switch state.");
-    expect(board.calls()).toEqual([]);
+    expect(board.calls().map((call) => call.path)).toEqual(["/api/auth/login"]);
   });
 
   it("shows why the board refused the change", async () => {
     // Arrange
     const detail = faker.lorem.sentence();
-    const board = fakeBoard(PAGE, [problem(422, detail)]);
+    const board = fakeBoard(PAGE, [tokenAnswer(), problem(422, detail)]);
     start(board.host);
+    signInOn(board);
+    await expect.poll(() => board.text(STATUS)).toBe("Signed in.");
     board.input("item-name").value = faker.word.noun().slice(0, 16);
 
     // Act
-    board.submit("form");
+    board.submit("#change");
 
     // Assert
     await expect.poll(() => board.text(STATUS)).toBe(`PATCH /api/items/1 answered 422: ${detail}`);

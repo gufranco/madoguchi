@@ -15,8 +15,8 @@ Ethernetシールドを載せたArduino Uno R4 Minimaで動く、Webサイト、
 | アダプター | `CardItemRepository`はRAMの表を持ち、各アイテムを一時ファイル経由で`/ITEMn.TXT`に書きます。ほかに`FlashSecretsAuthority`、`CardFailureLog`、`EepromSessionCounter`、3つのコントローラー。 |
 | コンポジション | [`board.composition.h`](src/board.composition.h)がすべてのアダプターとサービスを1か所で組み立てます。スケッチ、テスト、ファズターゲット、ホストサーバーがどれもこれを使うので、テストは本物の配線を通ります。 |
 | ネットワーク | 代替アドレス付きのDHCP、EEPROMに保存したMAC、リンク復帰時の再起動、mDNSの`madoguchi.local`。 |
-| テスト | 5ファイルのホストテスト74件、ファズターゲット、ホストサーバー、カバレッジ100パーセントのページテスト9件。 |
-| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.03個のアサーション。 |
+| テスト | 5ファイルのホストテスト86件、ファズターゲット、ホストサーバー、カバレッジ100パーセントのページテスト9件。 |
+| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.10個のアサーション。 |
 
 ## アーキテクチャ
 
@@ -133,13 +133,20 @@ RestApi/
 | できること | 今はしない理由 | このままのリスク |
 |:-----------|:---------------|:-----------------|
 | TLS | ボードにTLSスタックがない | トークンが平文でネットワークを通る |
-| POSTの冪等キー | 枠は4つで、再試行の損失は1つ | 再試行したPOSTが2つ目のアイテムを作る |
 | 1人を超えるロール | このサンプルには所有者1人で足りる | どのトークンでも何でもできる |
 
 ## 前提
 
 - ネットワークは平文のパスワードを送れる程度に信頼できる。
 - [`arduino_secrets.h`](arduino_secrets.h)は`python3 -m tools.madogen secrets examples/RestApi --user admin`で書き込み、本物のファイルはコミットしない。
+
+## ログインと安全な書き込み
+
+1つのクライアントアドレスからログインに5回失敗すると、そのアドレスは`429`と`Retry-After`で15分間ロックされ、ほかのアドレスはログインを続けられます。表は4つのアドレスを持ち、4つすべてがロック中の間は新しいアドレスもロックされるので、アドレスを替えてもロックは解けません。 アドレスごとの回数は`/LOGIN.TXT`に書き込まれるので、ロックは再起動後も残ります。
+
+項目を返す応答は、起動ごとの乱数、id、書き込みのたびに上がるリビジョンから作る強い`ETag`を送ります。それを`If-Match`で送り返すと、その後に誰かが項目を変えていた場合、書き込みは変更を上書きせずに`412 Precondition Failed`を返します。
+
+`POST`は`Idempotency-Key: "<1から64文字>"`を受け付けます。同じキーと同じボディの再試行は、最初のリクエストが作った項目とともに`201`を返し、同じキーで異なるボディなら`422`を返します。ボードは最後の8つのキーを覚えます。`/KEYS.TXT`に保存するので、再起動後の再試行も項目を見つけます。
 
 ## テスト
 
@@ -150,11 +157,11 @@ ctest --test-dir build -R '^RestApi\.' --output-on-failure
 
 | ファイル | テスト数 | 対象 |
 |:---------|---------:|:-----|
-| [`items.domain.test.cpp`](tests/items.domain.test.cpp) | 6 | 値の範囲、空の名前、変更のマージ、空の変更と不正な変更 |
+| [`items.domain.test.cpp`](tests/items.domain.test.cpp) | 8 | 値の範囲、空の名前、変更のマージ、空の変更と不正な変更 |
 | [`items.repository.test.cpp`](tests/items.repository.test.cpp) | 5 | アイテムのファイル、起動時の読み込み、削除したアイテムの忘却、拒否された保存、カードなし |
-| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 7 | セッション、ログイン、カード上の失敗回数、再起動をまたぐロックアウト、トークンの確認 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | セッション、ログイン、カード上の失敗回数、再起動をまたぐロックアウト、トークンの確認 |
 | [`audit.journal.test.cpp`](tests/audit.journal.test.cpp) | 5 | 桁あふれをまたぐ応答時間、応答ごとに1行、消去、カードなし |
-| [`api.http.test.cpp`](tests/api.http.test.cpp) | 51 | ページとgzip、すべてのルート、トークンの関門、ロックアウト、ログ、再起動 |
+| [`api.http.test.cpp`](tests/api.http.test.cpp) | 59 | ページとgzip、すべてのルート、トークンの関門、ロックアウト、ログ、再起動 |
 
 ファズターゲット[`rest_fuzz.cpp`](../../tests/fuzz/rest_fuzz.cpp)とホストサーバー[`main.cpp`](../../tests/host_server/main.cpp)は同じ`Board`を動かします。`cd "SD Card" && pnpm run test`はカバレッジ100パーセントで9件のページテストを実行します。
 
@@ -186,7 +193,7 @@ cd "SD Card" && pnpm install && pnpm run build
 
 | 分類 | 技術 |
 |:-----|:-----|
-| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中107,364バイト、RAM 32,768バイト中6,648バイト |
+| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中110,600バイト、RAM 32,768バイト中7,328バイト |
 | HTTPと認証 | Madoguchi：HS256、PBKDF2-HMAC-SHA256、`LoginGuard`、`SdLog`、mDNS |
 | カード | SdFat 2.3.0 |
 | ネットワーク | Ethernet 2.0.2 |

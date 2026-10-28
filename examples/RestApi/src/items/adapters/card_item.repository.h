@@ -35,12 +35,13 @@ class CardItemRepository {
   static_assert(kCapacity < 10U, "item numbers are one digit in the file name");
   static_assert(sizeof(rest_api::ItemPatch::name) == kNameSize, "the stored schema agrees");
 
-  uint8_t attach(SdT* const card) {
+  uint8_t attach(SdT* const card, const uint32_t session) {
     card_ = card;
     table_ = mado::SlotTable<Item, kCapacity>{};
+    next_revision_ = first_revision(session);
     uint8_t loaded = 0U;
     for (uint8_t item_id = 1U; (card_ != nullptr) && (item_id <= kCapacity); ++item_id) {
-      const Item item = load(item_id);
+      const Item item = revised(load(item_id));
       const bool placed = mado::check(item.id == item_id) && table_.place(item_id, item);
       loaded = static_cast<uint8_t>(loaded + (placed ? 1U : 0U));
     }
@@ -53,7 +54,7 @@ class CardItemRepository {
     if (!mado::check(stored != nullptr)) {
       return Written{false, true};
     }
-    *stored = item_from(draft, item_id);
+    *stored = revised(item_from(draft, item_id));
     return Written{true, save(*stored)};
   }
 
@@ -69,8 +70,8 @@ class CardItemRepository {
     if (!mado::check(stored != nullptr)) {
       return Written{false, true};
     }
-    *stored = item;
-    return Written{true, save(item)};
+    *stored = revised(item);
+    return Written{true, save(*stored)};
   }
 
   Written erase(const uint8_t item_id) {
@@ -82,6 +83,15 @@ class CardItemRepository {
   }
 
  private:
+  Item revised(const Item& item) {
+    const bool numbered = mado::check(is_item_id(item.id));
+    const bool counting = mado::check(next_revision_ != 0U);
+    Item next = item;
+    next.revision = (numbered && counting) ? next_revision_ : 0U;
+    next_revision_ = (numbered && counting) ? next_revision(next_revision_) : next_revision_;
+    return next;
+  }
+
   static bool copy_path(const char* const flash, char (&out)[kStorePathSize]) {
     const bool valid =
         mado::check(flash != nullptr) && mado::check(strlen_P(flash) < kStorePathSize);
@@ -157,6 +167,7 @@ class CardItemRepository {
     return complete ? item_from(draft, item_id) : Item{};
   }
 
+  uint32_t next_revision_ = 1U;
   SdT* card_ = nullptr;
   mado::SlotTable<Item, kCapacity> table_;
 };

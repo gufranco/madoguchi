@@ -28,8 +28,8 @@ template <typename ClientT, typename BoardT>
 class Router {
  public:
   using Exchange = mado::Exchange<ClientT, rest_api::Limits>;
-  using Items =
-      items::ItemsController<Exchange, typename BoardT::Repository, typename BoardT::Journal>;
+  using Items = items::ItemsController<Exchange, typename BoardT::Repository,
+                                       typename BoardT::Ledger, typename BoardT::Journal>;
   using Auth =
       identity::AuthController<Exchange, typename BoardT::Access, typename BoardT::Journal>;
   using Audit = audit::AuditController<Exchange, typename BoardT::Journal>;
@@ -82,7 +82,8 @@ class Router {
     switch (route) {
       case rest_api::kLogin: return Auth::login(exchange, board.access, board.journal, now);
       case rest_api::kListItems: return Items::list(exchange, board.repository);
-      case rest_api::kCreateItem: return Items::create(exchange, board.repository, board.journal);
+      case rest_api::kCreateItem:
+        return Items::create(exchange, board.repository, board.ledger, board.journal);
       case rest_api::kGetItem: return Items::get(exchange, board.repository, route);
       case rest_api::kReplaceItem:
         return Items::replace(exchange, board.repository, board.journal, route);

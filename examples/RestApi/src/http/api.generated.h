@@ -61,8 +61,10 @@ const char kHeaderName0[] PROGMEM = "Authorization";
 const char kHeaderName1[] PROGMEM = "Content-Type";
 const char kHeaderName2[] PROGMEM = "Accept-Encoding";
 const char kHeaderName3[] PROGMEM = "If-None-Match";
-const char kHeaderName4[] PROGMEM = "Range";
-const char* const kHeaderNames[] PROGMEM = {&kHeaderName0[0], &kHeaderName1[0], &kHeaderName2[0], &kHeaderName3[0], &kHeaderName4[0], nullptr};
+const char kHeaderName4[] PROGMEM = "Idempotency-Key";
+const char kHeaderName5[] PROGMEM = "If-Match";
+const char kHeaderName6[] PROGMEM = "Range";
+const char* const kHeaderNames[] PROGMEM = {&kHeaderName0[0], &kHeaderName1[0], &kHeaderName2[0], &kHeaderName3[0], &kHeaderName4[0], &kHeaderName5[0], &kHeaderName6[0], nullptr};
 
 struct Limits {
   static constexpr uint16_t kLineBufferSize = 128U;

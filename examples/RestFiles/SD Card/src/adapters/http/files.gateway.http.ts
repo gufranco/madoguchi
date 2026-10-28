@@ -22,13 +22,16 @@ async function failure(request: XMLHttpRequest, path: string): Promise<Error> {
   return apiError(request.status, describeFailure("PUT", path, request.status, problem));
 }
 
-function put(Request: typeof XMLHttpRequest, upload: Upload): Promise<void> {
+function put(Request: typeof XMLHttpRequest, token: string, upload: Upload): Promise<void> {
   const path = fileUrl(upload.name);
   return new Promise((done, fail) => {
     const request = new Request();
     request.open("PUT", path);
     request.setRequestHeader("Content-Type", "application/octet-stream");
     request.setRequestHeader("Repr-Digest", upload.digest);
+    if (token !== "") {
+      request.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
     request.upload.addEventListener("progress", (event) =>
       upload.progress(event.loaded, event.total),
     );
@@ -44,10 +47,11 @@ function put(Request: typeof XMLHttpRequest, upload: Upload): Promise<void> {
 export function createHttpFilesGateway(
   fetcher: Fetcher,
   Request: typeof XMLHttpRequest,
+  token: () => string,
 ): FilesGateway {
   return {
     list: () => readJson(fetcher, "GET", "/api/files", FileEntry.isList),
     remove: (name) => sendCommand(fetcher, "DELETE", fileUrl(name)),
-    upload: (upload) => put(Request, upload),
+    upload: (upload) => put(Request, token(), upload),
   };
 }

@@ -16,7 +16,7 @@ Arduino Uno R4 Minima 上擦除 SD 卡并为 SdFat 格式化的 JSON API。它�
 | 组合根 | [`RestFormat.ino`](RestFormat.ino) 构建服务、把它接到路由器上，并在每次 `loop` 中调用一次 `step`。 |
 | 页面 | 没有。API 只应答 JSON。 |
 | 测试 | 两个文件中针对假扇区设备的 34 个主机测试。 |
-| 规则 | JPL D-60411 与 Power of Ten：不用堆、不用虚函数、不用函数指针，每个函数平均 2.07 个断言。 |
+| 规则 | JPL D-60411 与 Power of Ten：不用堆、不用虚函数、不用函数指针，每个函数平均 2.06 个断言。 |
 
 ## 架构
 
@@ -50,6 +50,7 @@ RestFormat/
   openapi.json                                 API 契约，x-mado-card 为 false
   src/http/api.generated.h                     由工具生成
   src/http/api.router.h                        三个路由，没有卡上的页面
+  src/identity/...                             登录，与 RestAuth 相同的代码
   src/card/domain/file_system.policy.h         文件系统、卡的类型、容量
   src/card/domain/format_phase.entity.h        阶段、失败、进度
   src/card/application/card_driver.port.h      CardDriverPort
@@ -62,7 +63,7 @@ RestFormat/
 
 ## API 端点
 
-所有路由都不需要认证。
+除登录外，每个 `/api` 路由都需要持有者令牌，见“登录与安全写入”一节。
 
 | 方法 | 端点 | 说明 |
 |:-----|:-----|:-----|
@@ -118,14 +119,21 @@ RestFormat/
 
 | 可以做的事 | 现在不做的原因 | 照现状发布的风险 |
 |:-----------|:---------------|:-----------------|
-| 认证 | 本示例演示擦除；令牌由 RestApi 演示 | 网络上任何人都能擦除卡 |
 | 取消路由 | 擦了一半的卡无论如何都不能用 | 已开始的擦除会进行到结束或失败 |
 | 实测擦除时间 | 需要真实的 SDSC、SDHC 和 SDXC 卡 | 擦除所需的时间未知 |
 
 ## 假设
 
-- 网络是可信的：没有认证，也没有 TLS。
+- 网络足够可信，可以传输明文密码和令牌：没有 TLS。
 - 卡位于扩展板的 SPI 总线上，片选为 4 号引脚。
+
+## 登录与安全写入
+
+除 `POST /api/auth/login` 外，每个 `/api` 路由都需要持有者令牌。用 `{"username":"admin","password":"..."}` 登录，得到 15 分钟内且开发板重启前有效的令牌；缺少令牌、签名错误或令牌过时都会应答带 `WWW-Authenticate: Bearer` 的 `401`。
+
+同一客户端地址登录失败五次，该地址会以 `429` 和 `Retry-After` 锁定 15 分钟，其他地址仍可登录。表中保存四个地址，四个都被锁定时新地址也被锁定，所以轮换地址无法解除锁定。 次数只保存在 RAM 中，因为卡正是本示例要擦除的设备。
+
+构建前用 `python3 -m tools.madogen secrets examples/RestFormat --user admin` 把账户写入 [`arduino_secrets.h`](arduino_secrets.h)；提交的文件是全零的占位值，对每次登录都应答 `503`。
 
 ## 测试
 
@@ -137,7 +145,9 @@ ctest --test-dir build -R '^RestFormat\.' --output-on-failure
 | 文件 | 测试数 | 覆盖内容 |
 |:-----|------:|:---------|
 | [`card.domain.test.cpp`](tests/card.domain.test.cpp) | 8 | 阶段顺序、两种模式、第一遍中途的百分比、一个错误字节、卡的类型、容量 |
-| [`format.api.test.cpp`](tests/format.api.test.cpp) | 26 | 文件系统边界、卡的描述、延后插入的卡、被拒绝的启动、完整擦除、进度、每种失败 |
+| [`format.api.test.cpp`](tests/format.api.test.cpp) | 28 | 文件系统边界、卡的描述、延后插入的卡、被拒绝的启动、完整擦除、进度、每种失败 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 计数器、登录、卡上按地址记录的失败次数、跨重启的锁定、令牌检查 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 凭据规则、会话计数器、令牌结束时间 |
 
 ## 前提条件
 
@@ -152,18 +162,20 @@ ctest --test-dir build -R '^RestFormat\.' --output-on-failure
 ## 快速开始
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestFormat --user admin && cd examples/RestFormat
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
-curl http://192.168.1.177/api/card
-curl -X POST -H 'Content-Type: application/json' -d '{"capacity_mib":1024}' http://192.168.1.177/api/card/format
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/card
+curl -H "Authorization: Bearer $TOKEN" -X POST -H 'Content-Type: application/json' -d '{"capacity_mib":1024}' http://192.168.1.177/api/card/format
 ```
 
 ## 技术栈
 
 | 类别 | 技术 |
 |:-----|:-----|
-| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 71,852 字节，RAM 32,768 字节中用 9,936 字节，其中 4 KiB 是扇区缓冲区 |
+| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 92,456 字节，RAM 32,768 字节中用 10,344 字节，其中 4 KiB 是扇区缓冲区 |
 | HTTP | Madoguchi，不用堆的 C++11 |
 | 卡 | SdFat 2.3.0：`SdCardFactory`、`FatFormatter`、`ExFatFormatter`、`FsVolume` |
 | 网络 | Ethernet 2.0.2 |

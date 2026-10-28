@@ -7,10 +7,13 @@
 #include <Arduino.h>
 #include <Madoguchi.h>
 #include <mado/LogEntry.h>
+#include <mado/Precondition.h>
 #include <mado/Problem.h>
 #include <mado/Reply.h>
 #include <mado/check.h>
 #include <mado/http_status.h>
+#include <mado/if_match.h>
+#include <mado/parse_idempotency_key.h>
 #include <mado/send_problem.h>
 #include <stdint.h>
 #include <string.h>
@@ -18,18 +21,20 @@
 #include "../../http/api.generated.h"
 #include "../application/item_catalog.service.h"
 #include "../domain/item.entity.h"
+#include "item.etag.h"
 
 namespace items {
 
 constexpr uint32_t kMaxBody = 256U;
 
-template <typename ExchangeT, typename RepositoryT, typename JournalT>
+template <typename ExchangeT, typename RepositoryT, typename LedgerT, typename JournalT>
 class ItemsController {
   using Catalog = ItemCatalog<RepositoryT>;
 
  public:
   static bool list(ExchangeT& exchange, const RepositoryT& repository) {
-    bool written = send_json_head(exchange, mado::http::kOk) && (exchange.print(F("[")) > 0U);
+    bool written =
+        send_json_head(exchange, mado::http::kOk, nullptr) && (exchange.print(F("[")) > 0U);
     bool first = true;
     for (uint8_t item_id = 1U; written && (item_id <= kCapacity); ++item_id) {
       const ItemLookup lookup = Catalog::find(repository, item_id);
@@ -54,31 +59,43 @@ class ItemsController {
     return send_item(exchange, mado::http::kOk, lookup.item);
   }
 
-  static bool create(ExchangeT& exchange, RepositoryT& repository, JournalT& journal) {
+  static bool create(ExchangeT& exchange, RepositoryT& repository, LedgerT& ledger,
+                     JournalT& journal) {
+    const char* const header = exchange.header(F("Idempotency-Key"));
+    char key[mado::kIdempotencyKeySize] = {};
+    if (!mado::check((header == nullptr) || mado::parse_idempotency_key(header, key))) {
+      return mado::send_problem(exchange, bad_key());
+    }
     rest_api::Item body = {};
     uint8_t present = 0U;
     const mado::Problem problem = rest_api::read_item_body(exchange, body, present, kMaxBody);
     if (!mado::check(problem.status == mado::http::kNoResponse)) {
       return mado::send_problem(exchange, problem);
     }
-    const Result result = Catalog::add(repository, draft_of(body));
+    const Result result = Catalog::add_once(repository, ledger, &key[0], draft_of(body));
     warn_unsaved(journal, result);
-    if (!mado::check(result.outcome == Outcome::kDone)) {
+    const bool created =
+        mado::check((result.outcome == Outcome::kDone) || (result.outcome == Outcome::kReplayed));
+    if (!created) {
       return send_refusal(exchange, result.outcome);
     }
+    char tag[kItemTagSize] = {};
+    const bool tagged = mado::check(item_tag(result.item, tag));
     mado::Reply<ExchangeT> reply(exchange);
-    const bool head = reply.status(mado::http::kCreated)
-                          .json()
-                          .no_store()
-                          .location(rest_api::get_item_url(), result.item.id)
-                          .end();
+    const bool head = tagged && reply.status(mado::http::kCreated)
+                                    .json()
+                                    .no_store()
+                                    .location(rest_api::get_item_url(), result.item.id)
+                                    .header(F("ETag"), &tag[0])
+                                    .end();
     return head && rest_api::write_item(exchange, to_dto(result.item));
   }
 
   static bool replace(ExchangeT& exchange, RepositoryT& repository, JournalT& journal,
                       const uint8_t route) {
     const uint8_t item_id = requested_id(exchange, route);
-    if (!mado::check(Catalog::find(repository, item_id).found)) {
+    const ItemLookup current = Catalog::find(repository, item_id);
+    if (!mado::check(current.found)) {
       return send_refusal(exchange, Outcome::kMissing);
     }
     rest_api::Item body = {};
@@ -86,6 +103,9 @@ class ItemsController {
     const mado::Problem problem = rest_api::read_item_body(exchange, body, present, kMaxBody);
     if (!mado::check(problem.status == mado::http::kNoResponse)) {
       return mado::send_problem(exchange, problem);
+    }
+    if (!mado::check(unchanged(exchange, current.item))) {
+      return mado::send_problem(exchange, stale());
     }
     return answer(exchange, journal, Catalog::replace(repository, item_id, draft_of(body)));
   }
@@ -93,7 +113,8 @@ class ItemsController {
   static bool update(ExchangeT& exchange, RepositoryT& repository, JournalT& journal,
                      const uint8_t route) {
     const uint8_t item_id = requested_id(exchange, route);
-    if (!mado::check(Catalog::find(repository, item_id).found)) {
+    const ItemLookup current = Catalog::find(repository, item_id);
+    if (!mado::check(current.found)) {
       return send_refusal(exchange, Outcome::kMissing);
     }
     rest_api::ItemPatch body = {};
@@ -101,6 +122,9 @@ class ItemsController {
     const mado::Problem problem = rest_api::read_item_patch_body(exchange, body, present, kMaxBody);
     if (!mado::check(problem.status == mado::http::kNoResponse)) {
       return mado::send_problem(exchange, problem);
+    }
+    if (!mado::check(unchanged(exchange, current.item))) {
+      return mado::send_problem(exchange, stale());
     }
     return answer(exchange, journal,
                   Catalog::change(repository, item_id, change_of(body, present)));
@@ -128,6 +152,30 @@ class ItemsController {
       return send_refusal(exchange, result.outcome);
     }
     return send_item(exchange, mado::http::kOk, result.item);
+  }
+
+  static_assert(mado::kIdempotencyKeySize == kKeySize, "the header parser and the record agree");
+
+  static mado::Problem bad_key() {
+    return mado::Problem{
+        mado::http::kBadRequest,
+        F("Idempotency-Key must be a quoted string of 1 to 64 characters"),
+    };
+  }
+
+  static mado::Problem stale() {
+    return mado::Problem{
+        mado::http::kPreconditionFailed,
+        F("the item changed since the ETag in If-Match"),
+    };
+  }
+
+  static bool unchanged(ExchangeT& exchange, const Item& item) {
+    char tag[kItemTagSize] = {};
+    const bool tagged = mado::check(item_tag(item, tag));
+    const mado::Precondition outcome =
+        mado::if_match(exchange.header(F("If-Match")), tagged ? &tag[0] : nullptr);
+    return mado::check(outcome != mado::Precondition::kFails);
   }
 
   static void warn_unsaved(JournalT& journal, const Result& result) {
@@ -179,21 +227,30 @@ class ItemsController {
     return dto;
   }
 
-  static bool send_json_head(ExchangeT& exchange, const uint16_t code) {
+  static bool send_json_head(ExchangeT& exchange, const uint16_t code, const char* const tag) {
     const bool fresh = mado::check(!exchange.status_sent());
     const bool success = mado::check((code == mado::http::kOk) || (code == mado::http::kCreated));
+    if (!(fresh && success)) {
+      return false;
+    }
     mado::Reply<ExchangeT> reply(exchange);
-    return fresh && success && reply.status(code).json().no_store().end();
+    static_cast<void>(reply.status(code).json().no_store());
+    if (tag != nullptr) {
+      static_cast<void>(reply.header(F("ETag"), tag));
+    }
+    return reply.end();
   }
 
   static bool send_item(ExchangeT& exchange, const uint16_t code, const Item& item) {
-    const bool head = send_json_head(exchange, code);
+    char tag[kItemTagSize] = {};
+    const bool tagged = mado::check(item_tag(item, tag));
+    const bool head = tagged && send_json_head(exchange, code, &tag[0]);
     return head && mado::check(is_item_id(item.id)) && rest_api::write_item(exchange, to_dto(item));
   }
 
   static bool send_refusal(ExchangeT& exchange, const Outcome outcome) {
     const bool known =
-        mado::check(static_cast<uint8_t>(outcome) <= static_cast<uint8_t>(Outcome::kFull));
+        mado::check(static_cast<uint8_t>(outcome) <= static_cast<uint8_t>(Outcome::kKeyReused));
     const bool refused = known && mado::check(outcome != Outcome::kDone);
     switch (outcome) {
       case Outcome::kMissing:
@@ -208,6 +265,12 @@ class ItemsController {
         return mado::send_problem(exchange, mado::Problem{
                                                 mado::http::kUnprocessableContent,
                                                 F("the body changes no property"),
+                                            });
+      case Outcome::kKeyReused:
+        return mado::send_problem(exchange, mado::Problem{
+                                                mado::http::kUnprocessableContent,
+                                                F("this Idempotency-Key was sent before with a "
+                                                  "different body"),
                                             });
       default:
         return refused && mado::send_problem(exchange, mado::Problem{

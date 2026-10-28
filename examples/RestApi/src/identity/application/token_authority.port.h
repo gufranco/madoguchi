@@ -4,6 +4,7 @@
 #ifndef REST_API_IDENTITY_TOKEN_AUTHORITY_PORT_H
 #define REST_API_IDENTITY_TOKEN_AUTHORITY_PORT_H
 
+#include <mado/GuardEntry.h>
 #include <mado/TokenClaims.h>
 #include <mado/TokenStatus.h>
 #include <mado/reference_to.h>
@@ -13,6 +14,8 @@
 #include "../domain/credentials.value.h"
 
 namespace identity {
+
+constexpr uint8_t kGuardSlots = 4U;
 
 constexpr uint16_t kTokenTextSize = 201U;
 
@@ -42,12 +45,16 @@ struct TokenAuthorityPort {
 
 template <typename LogT>
 struct FailureLogPort {
-  using Load = decltype(mado::reference_to<LogT>().load());
-  using Save = decltype(mado::reference_to<LogT>().save(uint8_t{}));
+  using Load = decltype(mado::reference_to<LogT>().load(
+      mado::reference_to<mado::GuardEntry[kGuardSlots]>()));
+  using Save = decltype(mado::reference_to<LogT>().save(
+      mado::reference_to<const mado::GuardEntry[kGuardSlots]>()));
 
-  static_assert(mado::same_type<Load, uint8_t>::value,
-                "load() returns the stored failure count, or 0xFF when there is none");
-  static_assert(mado::same_type<Save, bool>::value, "save(count) stores the failure count");
+  static_assert(mado::same_type<Load, bool>::value,
+                "load(entries) fills the failure count kept for each address and returns whether "
+                "a stored table was read");
+  static_assert(mado::same_type<Save, bool>::value,
+                "save(entries) stores the failure count of each address");
 
   static constexpr bool kSatisfied = true;
 };

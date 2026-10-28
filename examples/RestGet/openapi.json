@@ -3,7 +3,7 @@
   "info": {
     "title": "Madoguchi GET example",
     "version": "1.0.0",
-    "description": "Reads two items the board seeds at start."
+    "description": "Reads two items the board seeds at start. Every /api route except /api/auth/login needs a bearer token from POST /api/auth/login, valid for 15 minutes and until the board restarts."
   },
   "servers": [
     {
@@ -52,10 +52,136 @@
             "maxLength": 64
           }
         }
+      },
+      "Credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "password"],
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["access_token", "token_type", "expires_in"],
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "token_type": {
+            "type": "string",
+            "maxLength": 6
+          },
+          "expires_in": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 900
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
       }
     }
   },
   "paths": {
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Exchange credentials for a bearer token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON or missing body",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong user name or password"
+          },
+          "413": {
+            "description": "The body is larger than this operation accepts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type is not application/json",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field is missing, unknown or too long",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Five failures in a row lock login for 15 minutes"
+          },
+          "503": {
+            "description": "The board has no signing key yet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/items": {
       "get": {
         "operationId": "listItems",
@@ -73,8 +199,23 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "No bearer token, or one that is malformed, wrongly signed, from an earlier boot or older than 15 minutes",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/items/{id}": {
@@ -113,8 +254,23 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "No bearer token, or one that is malformed, wrongly signed, from an earlier boot or older than 15 minutes",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     }
   }

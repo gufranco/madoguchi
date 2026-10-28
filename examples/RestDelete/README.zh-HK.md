@@ -14,8 +14,8 @@
 | 轉接器 | 建基於 `mado::SlotTable` 的 `RamItemRepository`；`ItemsController` 把結果對應為 `204` 或 `404`。 |
 | 組合根 | [`RestDelete.ino`](RestDelete.ino) 寫入 `lamp` 及 `fan`，掛載記憶卡，再把兩者交給路由器。 |
 | 契約 | [`openapi.json`](openapi.json) 產生 [`api.generated.h`](src/http/api.generated.h) 中的路由及路徑 id 剖析器。 |
-| 測試 | 四個檔案中的 23 個主機測試，以及覆蓋率 100% 的 2 個頁面測試。 |
-| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個函式平均 2.06 個斷言。 |
+| 測試 | 六個檔案中的 44 個主機測試，以及覆蓋率 100% 的 2 個頁面測試。 |
+| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個函式平均 2.05 個斷言。 |
 
 ## 架構
 
@@ -55,6 +55,7 @@ RestDelete/
   openapi.json                             API 契約
   src/http/api.generated.h                 由工具產生
   src/http/api.router.h                    刪除路由，其餘路徑交給記憶卡上的頁面
+  src/identity/...                         登入，與 RestAuth 相同的程式碼
   src/items/domain/item.entity.h           Item、ItemDraft、id 範圍及名稱規則
   src/items/application/item_repository.port.h
   src/items/application/item_catalog.service.h   add、find、remove
@@ -97,12 +98,19 @@ DELETE 的效果是冪等的：第二次呼叫令表保持第一次之後的狀�
 |:-----------|:---------------|:-----------------|
 | 附還原路由的軟刪除 | 超出動詞範例的範圍 | 刪除的項目在下次啟動前都不會回來 |
 | 把表保存在記憶卡上 | 持久化由 RestApi 示範 | 刪除的初始資料每次啟動都會回來 |
-| DELETE 的認證 | 持有人權杖由 RestApi 示範 | 網絡上任何人都能刪除 |
 
 ## 假設
 
-- 網絡是可信的：沒有認證，亦沒有 TLS。
+- 網絡足夠可信，可以傳送明文密碼及權杖：沒有 TLS。
 - 一次一個客戶端。
+
+## 登入及安全寫入
+
+除 `POST /api/auth/login` 外，每個 `/api` 路由都需要持有人權杖。以 `{"username":"admin","password":"..."}` 登入，取得 15 分鐘內及開發板重啟前有效的權杖；缺少權杖、簽署錯誤或權杖過時都會回應附 `WWW-Authenticate: Bearer` 的 `401`。
+
+同一客戶端位址登入失敗五次，該位址會以 `429` 及 `Retry-After` 鎖定 15 分鐘，其他位址仍可登入。表中保存四個位址，四個都被鎖定時新位址亦被鎖定，所以輪換位址無法解除鎖定。 每個位址的次數寫入 `/LOGIN.TXT`，所以鎖定在重啟後依然有效。
+
+建置前以 `python3 -m tools.madogen secrets examples/RestDelete --user admin` 把帳戶寫入 [`arduino_secrets.h`](arduino_secrets.h)；提交的檔案是全零的佔位值，對每次登入都回應 `503`。
 
 ## 測試
 
@@ -116,7 +124,9 @@ ctest --test-dir build -R '^RestDelete\.' --output-on-failure
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名稱規則、id 範圍、產生項目 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、表已滿、find |
 | [`item_removal.test.cpp`](tests/item_removal.test.cpp) | 4 | 刪除、第二次刪除、超出範圍的 id、空出 id 的重用 |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 4 | `204`、第二次的 `404`、格式錯誤的 id、對集合的 `405` |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 6 | `204`、第二次的 `404`、格式錯誤的 id、對集合的 `405` |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 計數器、登入、記憶卡上按位址記錄的失敗次數、跨重啟的鎖定、權杖檢查 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 憑證規則、工作階段計數器、權杖結束時間 |
 
 `cd "SD Card" && pnpm run test` 以 100% 覆蓋率執行 2 個頁面測試。
 
@@ -134,6 +144,7 @@ ctest --test-dir build -R '^RestDelete\.' --output-on-failure
 ## 開始使用
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestDelete --user admin && cd examples/RestDelete
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -143,14 +154,15 @@ cd "SD Card" && pnpm install && pnpm run build
 把 `SD Card/dist` 複製到記憶卡上，然後：
 
 ```bash
-curl -i -X DELETE http://192.168.1.177/api/items/2
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -i -X DELETE http://192.168.1.177/api/items/2
 ```
 
 ## 技術棧
 
 | 類別 | 技術 |
 |:-----|:-----|
-| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 73,856 位元組，RAM 32,768 位元組中用 5,904 位元組 |
+| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 89,076 位元組，RAM 32,768 位元組中用 6,312 位元組 |
 | HTTP | Madoguchi，不用堆積的 C++11 |
 | 記憶卡 | SdFat 2.3.0 |
 | 網絡 | Ethernet 2.0.2 |

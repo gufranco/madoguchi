@@ -15,8 +15,8 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Adapters | `CardItemRepository` keeps a RAM table and writes each item to `/ITEMn.TXT` through a temporary file; `FlashSecretsAuthority`, `CardFailureLog`, `EepromSessionCounter`; three controllers. |
 | Composition | [`board.composition.h`](src/board.composition.h) builds every adapter and service in one place. The sketch, the tests, the fuzz target and the host server all use it, so the tests exercise the real wiring. |
 | Network | DHCP with a fallback address, a MAC kept in EEPROM, a restart when the link returns, `madoguchi.local` over mDNS. |
-| Tests | 74 host tests in five files, a fuzz target, a host server, and 9 page tests with 100 percent coverage. |
-| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.03 assertions per function. |
+| Tests | 86 host tests in five files, a fuzz target, a host server, and 9 page tests with 100 percent coverage. |
+| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.10 assertions per function. |
 
 ## Architecture
 
@@ -133,13 +133,20 @@ Each item file holds one JSON line written by the generated `write_item_patch` a
 | What could be done | Why it is not done | Risk as shipped |
 |:-------------------|:-------------------|:----------------|
 | TLS | The board has no TLS stack | Tokens cross the network in clear text |
-| Idempotency keys on POST | Four slots; a retry costs one | A retried POST creates a second item |
 | Roles beyond one user | One owner fits the example | Every token can do everything |
 
 ## Assumptions
 
 - The network is trusted enough for clear-text passwords.
 - [`arduino_secrets.h`](arduino_secrets.h) is provisioned with `python3 -m tools.madogen secrets examples/RestApi --user admin` and the real file is never committed.
+
+## Sign-in and safe writes
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts of each address are written to `/LOGIN.TXT`, so a lock survives a restart.
+
+Responses that carry an item send a strong `ETag` built from a boot-random base, the id and a revision that every write raises. Send it back in `If-Match` and a write answers `412 Precondition Failed` when someone changed the item since, instead of overwriting their change.
+
+`POST` honours `Idempotency-Key: "<1 to 64 characters>"`. A retry with the same key and body answers `201` with the item the first request created; the same key with a different body answers `422`. The board remembers the last eight keys in `/KEYS.TXT`, so a retry after a restart still finds its item.
 
 ## Testing
 
@@ -150,11 +157,11 @@ ctest --test-dir build -R '^RestApi\.' --output-on-failure
 
 | File | Tests | Covers |
 |:-----|------:|:-------|
-| [`items.domain.test.cpp`](tests/items.domain.test.cpp) | 6 | value limits, an empty name, merging a change, empty and invalid changes |
+| [`items.domain.test.cpp`](tests/items.domain.test.cpp) | 8 | value limits, an empty name, merging a change, empty and invalid changes |
 | [`items.repository.test.cpp`](tests/items.repository.test.cpp) | 5 | the item file, loading at boot, forgetting a removed item, a refused save, no card |
-| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 7 | sessions, sign-in, failures on the card, a lockout across a restart, token checks |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | sessions, sign-in, failures on the card, a lockout across a restart, token checks |
 | [`audit.journal.test.cpp`](tests/audit.journal.test.cpp) | 5 | response times across the wrap, one line per response, clearing, no card |
-| [`api.http.test.cpp`](tests/api.http.test.cpp) | 51 | pages and gzip, every route, the token gate, the lockout, the log, restarts |
+| [`api.http.test.cpp`](tests/api.http.test.cpp) | 59 | pages and gzip, every route, the token gate, the lockout, the log, restarts |
 
 The fuzz target [`rest_fuzz.cpp`](../../tests/fuzz/rest_fuzz.cpp) and the host server [`main.cpp`](../../tests/host_server/main.cpp) run the same `Board`. `cd "SD Card" && pnpm run test` runs 9 page tests at 100 percent coverage.
 
@@ -186,7 +193,7 @@ Copy `SD Card/dist` to the card and open `http://madoguchi.local/`, or the fallb
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 107,364 of 262,144 bytes of flash, 6,648 of 32,768 bytes of RAM |
+| Board | Arduino Uno R4 Minima: 110,600 of 262,144 bytes of flash, 7,328 of 32,768 bytes of RAM |
 | HTTP and auth | Madoguchi: HS256, PBKDF2-HMAC-SHA256, `LoginGuard`, `SdLog`, mDNS |
 | Card | SdFat 2.3.0 |
 | Network | Ethernet 2.0.2 |

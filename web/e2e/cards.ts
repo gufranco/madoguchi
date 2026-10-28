@@ -24,7 +24,7 @@ const CARDS_WITHOUT_PORTS: readonly Omit<Card, "port">[] = [
   {
     example: "RestGet",
     heading: "Read items with GET",
-    status: "1 item.",
+    status: "Sign in to use this page.",
     answers: { "GET /api/items": { status: 200, body: [ITEM] } },
   },
   { example: "RestPost", heading: "Create an item with POST", status: undefined, answers: {} },

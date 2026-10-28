@@ -14,8 +14,8 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Use cases | `FileLibrary` mounts the card on demand, lists, opens, stores through a temporary file with SHA-256, and removes. A version number changes with every write and feeds the ETags. |
 | Adapters | `FilesController` maps HTTP, ranges, ETags and downloads to the use cases; `percent.encoding.h` writes the `Location` of a new file. |
 | Composition root | [`RestFiles.ino`](RestFiles.ino) seeds the version from analog noise, builds the library, starts DHCP and mDNS as `madofiles.local`. |
-| Tests | 29 host tests in two files, a libFuzzer target, and 20 page tests at 96 percent branch coverage. |
-| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.03 assertions per function. |
+| Tests | 55 host tests in four files, a libFuzzer target, and 21 page tests at 96 percent branch coverage. |
+| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.05 assertions per function. |
 
 ## Architecture
 
@@ -50,6 +50,7 @@ RestFiles/
   openapi.json                                 API contract
   src/http/api.generated.h                     generated
   src/http/api.router.h                        four file routes, card pages
+  src/identity/...                             sign-in, the same code as RestAuth
   src/files/domain/file_path.value.h           FilePath, is_file_path
   src/files/domain/upload.policy.h             upload_fits, DigestClaim, digest_accepted
   src/files/application/file_card.port.h       FileCardPort
@@ -62,7 +63,7 @@ RestFiles/
 
 ## API endpoints
 
-No route needs authentication.
+Listing and downloading are public; uploading and deleting need a bearer token, see Sign-in and safe writes.
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
@@ -101,7 +102,7 @@ An upload goes to `/UPLOAD.TMP` first, with a SHA-256 computed on the way. Only 
 
 ### The version lives in the use case
 
-Every successful write, delete or remount bumps `FileLibrary`'s version. `open` returns it inside a `mado::FileStamp`, and the controller turns size and version into a weak ETag. The seed comes from analog noise at boot, so a tag from before a restart does not match a file that changed while the board was off.
+Every successful write, delete or remount bumps `FileLibrary`'s version. `open` returns it inside a `mado::FileStamp`, and the controller turns size and version into a strong ETag. The seed comes from analog noise at boot, so a tag from before a restart does not match a file that changed while the board was off.
 
 ### Long names, checked in one place
 
@@ -111,15 +112,24 @@ Every successful write, delete or remount bumps `FileLibrary`'s version. `open` 
 
 | What could be done | Why it is not done | Risk as shipped |
 |:-------------------|:-------------------|:----------------|
-| Authentication | RestApi and RestAuth show it | Anyone on the network can read, replace and delete files |
 | Folders below the root | The listing and names are flat | Files in subfolders are reachable only by pages |
 | More than 32 entries in a listing | The bound keeps the loop provable | Entry 33 and later are not listed |
 
 ## Assumptions
 
-- The network is trusted: there is no authentication and no TLS.
+- The network is trusted enough for clear-text passwords and tokens: there is no TLS.
 - The card is FAT16, FAT32 or exFAT, as SdFat reads.
-- Uploads come from the page, which computes `Repr-Digest`; curl uploads without it are accepted unchecked.
+- Every upload carries `Repr-Digest`; the page computes it, and curl needs it computed by hand.
+
+## Sign-in and safe writes
+
+Listing and downloading stay public, so the page's download links keep working. `PUT` and `DELETE` need a bearer token: sign in with `{"username":"admin","password":"..."}` for a token valid for 15 minutes and until the board restarts; without one they answer `401` with `WWW-Authenticate: Bearer`.
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts of each address are written to `/LOGIN.TXT`, so a lock survives a restart.
+
+Write the account into [`arduino_secrets.h`](arduino_secrets.h) before building with `python3 -m tools.madogen secrets examples/RestFiles --user admin`; the committed file is an all-zero placeholder that answers `503` to every sign-in.
+
+`GET` sends a strong `ETag` from the name, size and a version that every write, delete and remount raises, so `If-Range` now resumes a download. Send the tag in `If-Match` on `PUT` and the upload answers `412` when the file changed since. Uploads without `Repr-Digest: sha-256=:<base64>:` answer `400`.
 
 ## Testing
 
@@ -131,9 +141,11 @@ ctest --test-dir build -R '^RestFiles\.' --output-on-failure
 | File | Tests | Covers |
 |:-----|------:|:-------|
 | [`files.domain.test.cpp`](tests/files.domain.test.cpp) | 7 | long names, a reserved character, the 8 MiB limit, digests, `Location` encoding |
-| [`files.api.test.cpp`](tests/files.api.test.cpp) | 22 | listing, ranges, ETags and `304`, downloads, uploads with and without a digest, refused writes and deletes, a card inserted late |
+| [`files.api.test.cpp`](tests/files.api.test.cpp) | 29 | listing, ranges, ETags and `304`, downloads, uploads with and without a digest, refused writes and deletes, a card inserted late |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | the EEPROM counter, sign-in, failures per address on the card, a lockout across a restart, token checks |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | credential rules, the session counter, token end times |
 
-The fuzz target [`files_fuzz.cpp`](../../tests/fuzz/files_fuzz.cpp) feeds random requests to the same router. `cd "SD Card" && pnpm run test` runs 20 page tests.
+The fuzz target [`files_fuzz.cpp`](../../tests/fuzz/files_fuzz.cpp) feeds random requests to the same router. `cd "SD Card" && pnpm run test` runs 21 page tests.
 
 ## Prerequisites
 
@@ -149,6 +161,7 @@ The fuzz target [`files_fuzz.cpp`](../../tests/fuzz/files_fuzz.cpp) feeds random
 ## Getting started
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestFiles --user admin && cd examples/RestFiles
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -158,7 +171,8 @@ cd "SD Card" && pnpm install && pnpm run build
 The board asks DHCP for an address and falls back to `192.168.1.178`. It answers as `madofiles.local`:
 
 ```bash
-curl -T notes.txt http://madofiles.local/api/files/notes.txt
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://madofiles.local/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -T notes.txt -H "Authorization: Bearer $TOKEN" -H "Repr-Digest: sha-256=:$(openssl dgst -sha256 -binary notes.txt | base64):" http://madofiles.local/api/files/notes.txt
 curl http://madofiles.local/api/files
 ```
 
@@ -166,7 +180,7 @@ curl http://madofiles.local/api/files
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 94,472 of 262,144 bytes of flash, 6,944 of 32,768 bytes of RAM |
+| Board | Arduino Uno R4 Minima: 104,108 of 262,144 bytes of flash, 7,048 of 32,768 bytes of RAM |
 | HTTP | Madoguchi: ranges, ETags, SHA-256, mDNS, DHCP fallback |
 | Card | SdFat 2.3.0 with long names |
 | Network | Ethernet 2.0.2 |

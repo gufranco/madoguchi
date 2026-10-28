@@ -27,7 +27,22 @@ struct Item {
   char name[kNameSize];
   int32_t value;
   bool on;
+  uint32_t revision;
 };
+
+constexpr uint32_t kRevisionSpread = 2654435761UL;
+
+inline uint32_t next_revision(const uint32_t revision) {
+  const bool started = mado::check(revision != 0U);
+  const bool room = mado::check(revision != UINT32_MAX);
+  return (started && room) ? (revision + 1U) : 1U;
+}
+
+inline uint32_t first_revision(const uint32_t session) {
+  const bool counted = mado::check(session != 0U);
+  const uint32_t spread = (counted ? session : 1U) * kRevisionSpread;
+  return mado::check(spread != UINT32_MAX) ? (spread | 1U) : 1U;
+}
 
 struct ItemChange {
   bool renames;

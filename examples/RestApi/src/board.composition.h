@@ -13,6 +13,7 @@
 #include "identity/adapters/flash_secrets.authority.h"
 #include "identity/application/access.service.h"
 #include "items/adapters/card_item.repository.h"
+#include "items/adapters/card_post.ledger.h"
 
 template <typename SdT, typename SecretsT, uint16_t kRead, uint16_t kWrite>
 struct Board {
@@ -20,6 +21,7 @@ struct Board {
   using Failures = identity::CardFailureLog<SdT, kRead, kWrite>;
   using Access = identity::AccessService<Authority, Failures>;
   using Repository = items::CardItemRepository<SdT, kRead, kWrite>;
+  using Ledger = items::CardPostLedger<SdT, kRead, kWrite>;
   using Journal = audit::RequestJournal<SdT, kRead, kWrite>;
 
   static constexpr uint16_t kReadMode = kRead;
@@ -28,6 +30,7 @@ struct Board {
   Failures failures{nullptr};
   Access access{authority, failures};
   Repository repository;
+  Ledger ledger;
   Journal journal;
   mado::UptimeClock uptime;
   SdT* card = nullptr;
@@ -39,9 +42,11 @@ bool begin_board(Board<SdT, SecretsT, kRead, kWrite>& board, const uint32_t sess
   board.card = sd_card.begin(chip_select) ? &sd_card : nullptr;
   board.failures = typename Board<SdT, SecretsT, kRead, kWrite>::Failures(board.card);
   board.access.begin(session);
-  const uint8_t loaded = board.repository.attach(board.card);
+  const uint8_t loaded = board.repository.attach(board.card, session);
+  const uint8_t remembered = board.ledger.attach(board.card);
   board.journal.attach(board.card, session);
-  return mado::check(loaded <= items::kCapacity) && mado::check(board.card != nullptr);
+  return mado::check(loaded <= items::kCapacity) && mado::check(remembered <= items::kLedgerSize) &&
+         mado::check(board.card != nullptr);
 }
 
 #endif

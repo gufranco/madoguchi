@@ -25,7 +25,7 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 
 ---
 
-Madoguchi runs on the Uno R4 Minima with a W5x00 or ENC28J60 shield and an SD card, and allocates nothing on the heap. The C++ code holds no HTML, CSS, script or image: every page lives on the card and comes from a separate web project per example, written in TypeScript with classless Pico CSS, built by Vite into the card's files with gzip copies. The board answers the REST API generated from one OpenAPI document, with JWT login, JSON bodies and every HTTP verb. CI builds all 9 examples, fails any build over the board's flash or RAM budget, runs 1,336 host tests, 91 tool tests, 127 page tests and 32 browser tests, builds every card, and fuzzes the parsers on every push and pull request.
+Madoguchi runs on the Uno R4 Minima with a W5x00 or ENC28J60 shield and an SD card, and allocates nothing on the heap. The C++ code holds no HTML, CSS, script or image: every page lives on the card and comes from a separate web project per example, written in TypeScript with classless Pico CSS, built by Vite into the card's files with gzip copies. The board answers the REST API generated from one OpenAPI document, with JWT login, JSON bodies and every HTTP verb. CI builds all 9 examples, fails any build over the board's flash or RAM budget, runs 1,546 host tests, 91 tool tests, 135 page tests and 32 browser tests, builds every card, and fuzzes the parsers on every push and pull request.
 
 The name is 窓口, Japanese for the service counter where you hand over a request and get an answer back.
 
@@ -157,15 +157,15 @@ Sizes in bytes on the Uno R4 Minima, built with arduino-cli 1.5.1, arduino:renes
 
 | Example | Shows | Flash, of 262,144 | RAM used, of 32,768 |
 |:--------|:------|------:|------:|
-| [`RestGet`](examples/RestGet/RestGet.ino) | `GET` of the item list and of one item | 74,764 | 5,904 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | `POST` of a new item as JSON | 77,032 | 5,904 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | `PUT` replacing an item | 77,656 | 5,904 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | `PATCH` changing some fields of an item | 77,692 | 5,904 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | `DELETE` of an item by id | 73,856 | 5,904 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | login and one protected route | 87,496 | 6,184 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | files on SD: list, download, ranges, upload with progress, delete | 94,472 | 6,944 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | the full API, its site, Swagger UI and the request log | 107,364 | 6,648 |
-| [`RestFormat`](examples/RestFormat/RestFormat.ino) | wipe with 0x00 and 0xFF, verify, then format as FAT16, FAT32 or exFAT; JSON only | 71,852 | 9,936 |
+| [`RestGet`](examples/RestGet/RestGet.ino) | `GET` of the item list and of one item | 89,612 | 6,312 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | `POST` of a new item as JSON | 90,816 | 6,928 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | `PUT` replacing an item | 91,652 | 6,332 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | `PATCH` changing some fields of an item | 91,656 | 6,332 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | `DELETE` of an item by id | 89,076 | 6,312 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | login and one protected route | 88,324 | 6,224 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | files on SD: list, download, ranges, upload with progress, delete | 104,108 | 7,048 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | the full API, its site, Swagger UI and the request log | 110,600 | 7,328 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | wipe with 0x00 and 0xFF, verify, then format as FAT16, FAT32 or exFAT; JSON only | 92,456 | 10,344 |
 
 Every example but RestFormat answers `/api/openapi.json` from the card and serves Swagger UI at `/docs/`. CI fails a build that crosses the board's budget.
 
@@ -337,7 +337,7 @@ const bool spec = mado::serve_card_path<FILE_READ>(exchange, sd_card, &kSpecPath
 
 `serve_card_file()` resolves the request path on the card, answers `400` for a path that climbs out and `404` for a missing file or a folder, and sends the `.gz` copy next to the file when the browser accepts gzip. A name that is eight hex digits and an extension, such as `9f86d081.js`, is cached as `public, max-age=31536000, immutable`; every other file gets `no-cache`. `serve_card_path()` serves one fixed file, which is how `/api/openapi.json` reaches `/openapi.json`.
 
-For downloads, ranges and conditional requests, pass a `mado::FileReply` to `mado::send_file()` with the size, type, gzip flag, ETag, download name and `Cache-Control` value. `mado::file_etag()` builds a weak ETag from the name, the size and a version that the sketch changes on every write and at boot, so a file replaced by one of the same size gets a new tag. A `Range` with `If-Range` gets the whole file, because a weak tag cannot prove the parts belong together. [`RestFiles`](examples/RestFiles/RestFiles.ino) uses all of it.
+For downloads, ranges and conditional requests, pass a `mado::FileReply` to `mado::send_file()` with the size, type, gzip flag, ETag, download name and `Cache-Control` value. `mado::file_etag()` builds a weak ETag from the name, the size and a version that the sketch changes on every write and at boot, so a file replaced by one of the same size gets a new tag. A `Range` with `If-Range` gets the whole file under a weak tag, because a weak tag cannot prove the parts belong together. [`RestFiles`](examples/RestFiles/RestFiles.ino) sends the strong form of the same tag, which is sound there because the version changes on every write, delete and remount, so its ranges resume; `mado::if_match()` compares that strong tag before a `PUT` replaces the file.
 
 ### Basic auth
 
@@ -492,11 +492,11 @@ curl -s -H "Authorization: Bearer $TOKEN" http://madoguchi.local/api/log | jq -c
 | `POST /api/items`, `PUT`, `PATCH`, `DELETE /api/items/{id}` | changes, with a bearer token |
 | `GET /api/log`, `DELETE /api/log` | the request log as JSON lines, with `Range` for its end, and clearing it, with a bearer token |
 
-[`RestAuth`](examples/RestAuth/RestAuth.ino) shows login and one protected route. [`RestGet`](examples/RestGet/RestGet.ino), [`RestPost`](examples/RestPost/RestPost.ino), [`RestPut`](examples/RestPut/RestPut.ino), [`RestPatch`](examples/RestPatch/RestPatch.ino) and [`RestDelete`](examples/RestDelete/RestDelete.ino) each show one verb with no authentication. [`RestFiles`](examples/RestFiles/RestFiles.ino) lists, downloads, uploads with a progress bar and deletes files on the SD card, with no authentication, so it belongs on a trusted network. Each keeps its application code in a header next to the sketch, so the host tests run the code the board runs, and answers `503` with a problem document when the card is missing.
+[`RestAuth`](examples/RestAuth/RestAuth.ino) shows login and one protected route. [`RestGet`](examples/RestGet/RestGet.ino), [`RestPost`](examples/RestPost/RestPost.ino), [`RestPut`](examples/RestPut/RestPut.ino), [`RestPatch`](examples/RestPatch/RestPatch.ino) and [`RestDelete`](examples/RestDelete/RestDelete.ino) each show one verb behind the same login: every `/api` route except `POST /api/auth/login` needs a bearer token. [`RestFiles`](examples/RestFiles/RestFiles.ino) lists, downloads, uploads with a progress bar and deletes files on the SD card; listing and downloading are public, uploading and deleting need a token. Each keeps its application code in layers under `src/`, so the host tests run the code the board runs, and answers `503` with a problem document when the card is missing. Every login locks out a client address after five failures, keeping other addresses open.
 
 ### Wiping and formatting a card
 
-[`RestFormat`](examples/RestFormat/RestFormat.ino) prepares a card for every other example. It answers JSON only, with no pages and no login, so keep it on a trusted network. It erases everything on the card.
+[`RestFormat`](examples/RestFormat/RestFormat.ino) prepares a card for every other example. It answers JSON only, with no pages, and every route needs a bearer token from `POST /api/auth/login`. It erases everything on the card.
 
 | Route | Does |
 |:------|:-----|
@@ -578,10 +578,10 @@ Host tests use CMake and googletest, with a small Arduino shim, a fake client, a
 
 | Suite | Command | Covers |
 |:------|:--------|:-------|
-| Library and examples | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,336 tests: an RFC 9112 conformance table, parsing, routing, responses, card files, ranges, the network helpers, the SD log, crypto, tokens, the examples' application code, and a replay of each fuzz corpus |
+| Library and examples | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,546 tests: an RFC 9112 conformance table, parsing, routing, responses, card files, ranges, the network helpers, the SD log, crypto, tokens, the examples' application code, and a replay of each fuzz corpus |
 | Coverage | `gcovr build --root . --filter src/ --merge-lines --txt` | line and function coverage of `src/`, gated at 95 percent in CI |
 | Generator and gates | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | 91 tests for `madogen`, the assertion density gate, the size gate and the throughput tool |
-| Pages | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | the dependency audit, Biome, TypeScript, html-validate, 127 Vitest tests with a 95 percent coverage gate, and every card build |
+| Pages | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | the dependency audit, Biome, TypeScript, html-validate, 135 Vitest tests with a 95 percent coverage gate, and every card build |
 | Browser | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | 32 Playwright tests: every page and docs page at 320 px and desktop width |
 | Throughput | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | download and upload speed against a board, printed as JSON |
 | Generated code | `python3 -m tools.madogen check examples/Rest*` | `src/http/api.generated.h` matches its sources and no real key is committed |

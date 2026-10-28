@@ -15,7 +15,7 @@
 | 組合根 | [`RestPost.ino`](RestPost.ino) 建立儲存庫，掛載記憶卡，再把兩者交給路由器。 |
 | 契約 | [`openapi.json`](openapi.json) 產生 [`api.generated.h`](src/http/api.generated.h) 中的路由、請求主體讀取器及 JSON 寫入函式。 |
 | 錯誤 | 每次拒絕都是 RFC 9457 問題詳情：`400`、`413`、`415`、`422` 或 `507`。 |
-| 測試 | 三個檔案中的 29 個主機測試，以及覆蓋率 100% 的 7 個頁面測試。 |
+| 測試 | 五個檔案中的 54 個主機測試，以及覆蓋率 100% 的 7 個頁面測試。 |
 | 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個函式平均 2.14 個斷言。 |
 
 ## 架構
@@ -59,6 +59,7 @@ RestPost/
   src/
     http/api.generated.h                   路由、上限、請求主體讀取器、JSON 寫入，由工具產生
     http/api.router.h                      建立路由，其餘路徑交給記憶卡上的頁面
+    identity/...                           登入，與 RestAuth 相同的程式碼
     items/domain/item.entity.h             Item、ItemDraft、id 範圍及名稱規則
     items/application/item_repository.port.h   儲存庫必須提供的呼叫
     items/application/item_catalog.service.h   用例：add、find
@@ -72,7 +73,7 @@ RestPost/
 
 ## API 端點
 
-所有路由都不需要認證。
+除登入外，每個 `/api` 路由都需要持有人權杖，見「登入及安全寫入」一節。
 
 | 方法 | 端點 | 說明 |
 |:-----|:-----|:-----|
@@ -125,14 +126,23 @@ RestPost/
 
 | 可以做的事 | 現在不做的原因 | 照現狀發佈的風險 |
 |:-----------|:---------------|:-----------------|
-| POST 的冪等鍵 | RAM 中只有四個槽位，一次重試只多佔一個 | 重試的 POST 會建立第二個項目 |
 | 把項目保存在記憶卡上 | 本範例示範 POST，持久化由 RestApi 示範 | 重啟後項目消失 |
 | 用來讀回的 GET 路由 | 每個動詞範例只示範一個動詞 | 客戶端只能在 `201` 的請求主體中看到項目 |
 
 ## 假設
 
-- 網絡是可信的：沒有認證，亦沒有 TLS。
+- 網絡足夠可信，可以傳送明文密碼及權杖：沒有 TLS。
 - 一次一個客戶端：`mado::Server` 每次 `loop` 只回應一個連線。
+
+## 登入及安全寫入
+
+除 `POST /api/auth/login` 外，每個 `/api` 路由都需要持有人權杖。以 `{"username":"admin","password":"..."}` 登入，取得 15 分鐘內及開發板重啟前有效的權杖；缺少權杖、簽署錯誤或權杖過時都會回應附 `WWW-Authenticate: Bearer` 的 `401`。
+
+同一客戶端位址登入失敗五次，該位址會以 `429` 及 `Retry-After` 鎖定 15 分鐘，其他位址仍可登入。表中保存四個位址，四個都被鎖定時新位址亦被鎖定，所以輪換位址無法解除鎖定。 每個位址的次數寫入 `/LOGIN.TXT`，所以鎖定在重啟後依然有效。
+
+建置前以 `python3 -m tools.madogen secrets examples/RestPost --user admin` 把帳戶寫入 [`arduino_secrets.h`](arduino_secrets.h)；提交的檔案是全零的佔位值，對每次登入都回應 `503`。
+
+`POST` 支援 `Idempotency-Key: "<1 至 64 個字元>"`。相同鍵及相同請求主體的重試會回應 `201` 並傳回第一次請求建立的項目；相同鍵但請求主體不同則回應 `422`。開發板記住最近八個鍵，與項目一樣保存在 RAM 中。
 
 ## 測試
 
@@ -145,7 +155,9 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 |:-----|------:|:---------|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名稱規則、id 範圍、產生項目 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、表已滿、find |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 14 | `201` 及 `Location`、id 次序、`507`、八種被拒絕的請求主體、空名稱 |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 20 | `201` 及 `Location`、id 次序、`507`、八種被拒絕的請求主體、空名稱 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 計數器、登入、記憶卡上按位址記錄的失敗次數、跨重啟的鎖定、權杖檢查 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 憑證規則、工作階段計數器、權杖結束時間 |
 
 `cd "SD Card" && pnpm run test` 以 100% 覆蓋率執行 7 個頁面測試。
 
@@ -163,6 +175,7 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 ## 開始使用
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestPost --user admin && cd examples/RestPost
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -172,14 +185,15 @@ cd "SD Card" && pnpm install && pnpm run build
 把 `SD Card/dist` 複製到記憶卡上，然後：
 
 ```bash
-curl -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
 ```
 
 ## 技術棧
 
 | 類別 | 技術 |
 |:-----|:-----|
-| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 77,032 位元組，RAM 32,768 位元組中用 5,904 位元組 |
+| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 90,816 位元組，RAM 32,768 位元組中用 6,928 位元組 |
 | HTTP | Madoguchi，不用堆積的 C++11 |
 | 記憶卡 | SdFat 2.3.0 |
 | 網絡 | Ethernet 2.0.2 |

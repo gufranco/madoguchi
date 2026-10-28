@@ -117,4 +117,27 @@ TEST_F(ItemChangeTest, ReportsAnIdThatHoldsNoItem) {
   EXPECT_EQ(result.status, items::ChangeOutcome::kMissing);
 }
 
+TEST_F(ItemChangeTest, RaisesTheRevisionOnEveryChange) {
+  // Arrange
+  const uint32_t before = Catalog::find(repository(), 1U).item.revision;
+
+  // Act
+  const items::ChangeResult result = Catalog::change(repository(), 1U, switch_to(false));
+
+  // Assert
+  EXPECT_EQ(result.status, items::ChangeOutcome::kChanged);
+  EXPECT_EQ(result.item.revision, before + 1U);
+}
+
+TEST(ItemRevision, WrapsToOneInsteadOfZero) {
+  // Arrange
+  const uint32_t last = UINT32_MAX;
+
+  // Act
+  const uint32_t next = items::next_revision(last);
+
+  // Assert
+  EXPECT_EQ(next, 1U);
+}
+
 }

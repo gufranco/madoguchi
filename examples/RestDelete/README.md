@@ -14,8 +14,8 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Adapters | `RamItemRepository` on a `mado::SlotTable`; `ItemsController` maps the outcome to `204` or `404`. |
 | Composition root | [`RestDelete.ino`](RestDelete.ino) seeds "lamp" and "fan", mounts the card and attaches both to the router. |
 | Contract | [`openapi.json`](openapi.json) generates the route and the path id parser in [`api.generated.h`](src/http/api.generated.h). |
-| Tests | 23 host tests in four files and 2 page tests with 100 percent coverage. |
-| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.06 assertions per function. |
+| Tests | 44 host tests in six files and 2 page tests with 100 percent coverage. |
+| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.05 assertions per function. |
 
 ## Architecture
 
@@ -55,6 +55,7 @@ RestDelete/
   openapi.json                             API contract
   src/http/api.generated.h                 generated
   src/http/api.router.h                    the delete route, card pages for every other path
+  src/identity/...                         sign-in, the same code as RestAuth
   src/items/domain/item.entity.h           Item, ItemDraft, id range and name rules
   src/items/application/item_repository.port.h
   src/items/application/item_catalog.service.h   add, find, remove
@@ -97,12 +98,19 @@ This example's use cases call `insert` for the seeds, `find` after an insert, an
 |:-------------------|:-------------------|:----------------|
 | Soft delete with a restore route | Out of scope for a verb example | A deleted item is gone until the next boot |
 | Keep the table on the card | RestApi shows persistence | Deleted seeds return on every boot |
-| Authentication on DELETE | RestApi shows bearer tokens | Anyone on the network can delete |
 
 ## Assumptions
 
-- The network is trusted: there is no authentication and no TLS.
+- The network is trusted enough for clear-text passwords and tokens: there is no TLS.
 - One client at a time.
+
+## Sign-in and safe writes
+
+Every `/api` route except `POST /api/auth/login` needs a bearer token. Sign in with `{"username":"admin","password":"..."}` for a token valid for 15 minutes and until the board restarts; a missing, wrongly signed or stale token answers `401` with `WWW-Authenticate: Bearer`.
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts of each address are written to `/LOGIN.TXT`, so a lock survives a restart.
+
+Write the account into [`arduino_secrets.h`](arduino_secrets.h) before building with `python3 -m tools.madogen secrets examples/RestDelete --user admin`; the committed file is an all-zero placeholder that answers `503` to every sign-in.
 
 ## Testing
 
@@ -116,7 +124,9 @@ ctest --test-dir build -R '^RestDelete\.' --output-on-failure
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | name rules, the id range, building an item |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add, a full table, find |
 | [`item_removal.test.cpp`](tests/item_removal.test.cpp) | 4 | remove, a second remove, an id past the range, the freed id reused |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 4 | `204`, `404` the second time, a malformed id, `405` on the collection |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 6 | `204`, `404` the second time, a malformed id, `405` on the collection |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | the EEPROM counter, sign-in, failures per address on the card, a lockout across a restart, token checks |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | credential rules, the session counter, token end times |
 
 `cd "SD Card" && pnpm run test` runs 2 page tests at 100 percent coverage.
 
@@ -134,6 +144,7 @@ ctest --test-dir build -R '^RestDelete\.' --output-on-failure
 ## Getting started
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestDelete --user admin && cd examples/RestDelete
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -143,14 +154,15 @@ cd "SD Card" && pnpm install && pnpm run build
 Copy `SD Card/dist` to the card, then:
 
 ```bash
-curl -i -X DELETE http://192.168.1.177/api/items/2
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -i -X DELETE http://192.168.1.177/api/items/2
 ```
 
 ## Tech stack
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 73,856 of 262,144 bytes of flash, 5,904 of 32,768 bytes of RAM |
+| Board | Arduino Uno R4 Minima: 89,076 of 262,144 bytes of flash, 6,312 of 32,768 bytes of RAM |
 | HTTP | Madoguchi, heap-free C++11 |
 | Card | SdFat 2.3.0 |
 | Network | Ethernet 2.0.2 |

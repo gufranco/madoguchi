@@ -15,8 +15,8 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Contract | [`openapi.json`](openapi.json) is the source of the routes, the wire structs and the JSON writers in [`api.generated.h`](src/http/api.generated.h). |
 | Errors | Unknown ids answer `404` with an RFC 9457 problem. A missing card answers `503`. |
 | Pages | `SD Card` is a Vite and TypeScript project with the same split: `domain`, `application` with its ports, `adapters/http` and `adapters/dom`. |
-| Tests | 26 host tests in three files and 9 page tests with 100 percent coverage. |
-| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, every loop bounded, 2.06 assertions per function. |
+| Tests | 47 host tests in five files and 9 page tests with 100 percent coverage. |
+| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, every loop bounded, 2.02 assertions per function. |
 
 ## Architecture
 
@@ -61,6 +61,7 @@ RestGet/
     http/
       api.generated.h                      routes, limits, wire structs and JSON writers, generated
       api.router.h                         route id to controller, card pages for every other path
+    identity/                              sign-in, the same code as RestAuth
     items/
       domain/item.entity.h                 Item, ItemDraft, id range and name rules
       application/item_repository.port.h   the calls a repository must offer
@@ -75,7 +76,7 @@ Files use `name.type.h`: `item.entity.h`, `item_catalog.service.h`, `ram_item.re
 
 ## API endpoints
 
-No route needs authentication.
+Every `/api` route except the login needs a bearer token; see Sign-in and safe writes.
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
@@ -131,9 +132,17 @@ The generated header declares `rest_get::Item` with an `int32_t id`, because JSO
 
 ## Assumptions
 
-- The network is trusted: there is no authentication and no TLS.
+- The network is trusted enough for clear-text passwords and tokens: there is no TLS.
 - One client at a time: `mado::Server` answers one connection per `loop`.
 - The SD card holds the files that `pnpm run build` writes into `SD Card/dist`.
+
+## Sign-in and safe writes
+
+Every `/api` route except `POST /api/auth/login` needs a bearer token. Sign in with `{"username":"admin","password":"..."}` for a token valid for 15 minutes and until the board restarts; a missing, wrongly signed or stale token answers `401` with `WWW-Authenticate: Bearer`.
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts of each address are written to `/LOGIN.TXT`, so a lock survives a restart.
+
+Write the account into [`arduino_secrets.h`](arduino_secrets.h) before building with `python3 -m tools.madogen secrets examples/RestGet --user admin`; the committed file is an all-zero placeholder that answers `503` to every sign-in.
 
 ## Testing
 
@@ -148,7 +157,9 @@ ctest --test-dir build -R '^RestGet\.' --output-on-failure
 |:-----|------:|:-------|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | name rules, the id range, building an item from a draft |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add, a full table, find inside and outside the range |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 11 | list, read, HEAD, three kinds of missing id, 405, the spec, a page, a missing card |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 13 | list, read, HEAD, three kinds of missing id, 405, the spec, a page, a missing card |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | the EEPROM counter, sign-in, failures per address on the card, a lockout across a restart, token checks |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | credential rules, the session counter, token end times |
 
 The page tests run in Vitest with happy-dom: `cd "SD Card" && pnpm run test` runs 9 tests at 100 percent statement, branch, function and line coverage.
 
@@ -166,6 +177,7 @@ The page tests run in Vitest with happy-dom: `cd "SD Card" && pnpm run test` run
 ## Getting started
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestGet --user admin && cd examples/RestGet
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -175,7 +187,8 @@ cd "SD Card" && pnpm install && pnpm run build
 Copy the contents of `SD Card/dist` to the root of a FAT32 or exFAT card, put it in the shield and open `http://192.168.1.177/`.
 
 ```bash
-curl http://192.168.1.177/api/items/1
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/items/1
 ```
 
 ```json
@@ -186,7 +199,7 @@ curl http://192.168.1.177/api/items/1
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 74,764 of 262,144 bytes of flash, 5,904 of 32,768 bytes of RAM |
+| Board | Arduino Uno R4 Minima: 89,612 of 262,144 bytes of flash, 6,312 of 32,768 bytes of RAM |
 | HTTP | Madoguchi, heap-free C++11 |
 | Card | SdFat 2.3.0 |
 | Network | Ethernet 2.0.2 |

@@ -15,8 +15,8 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Adapters | `FlashSecretsAuthority` reads the key, salt and hash from flash; `CardFailureLog` keeps the failure count on the card; `EepromSessionCounter` counts boots; two controllers serve HTTP. |
 | Composition root | [`RestAuth.ino`](RestAuth.ino) mounts the card, builds the adapters and the service, and starts a new session from EEPROM. |
 | Security | Constant-time comparisons, a 15-minute lockout after five failures that survives a restart, tokens that end at the next boot. |
-| Tests | 26 host tests in three files and 6 page tests with 100 percent coverage. |
-| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.02 assertions per function. |
+| Tests | 28 host tests in three files and 6 page tests with 100 percent coverage. |
+| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.09 assertions per function. |
 
 ## Architecture
 
@@ -124,12 +124,15 @@ Signing in and greeting change for different reasons: a new hash or lockout poli
 |:-------------------|:-------------------|:----------------|
 | TLS | The board has no TLS stack | Credentials and tokens cross the network in clear text |
 | More than one user | One user fits the example | Everyone shares one account |
-| A lockout per client address | A single counter is simpler | One attacker can lock out the owner for 15 minutes |
 
 ## Assumptions
 
 - The network is trusted enough for clear-text passwords.
 - [`arduino_secrets.h`](arduino_secrets.h) is provisioned with `python3 -m tools.madogen secrets examples/RestAuth --user admin` and the real file is never committed.
+
+## Sign-in and safe writes
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts of each address are written to `/LOGIN.TXT`, so a lock survives a restart.
 
 ## Testing
 
@@ -141,7 +144,7 @@ ctest --test-dir build -R '^RestAuth\.' --output-on-failure
 | File | Tests | Covers |
 |:-----|------:|:-------|
 | [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 12 | credential rules, five session counter cases, token end times, the greeting |
-| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 7 | the EEPROM counter, sign-in, failures on the card, a lockout across a restart, token checks |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | the EEPROM counter, sign-in, failures on the card, a lockout across a restart, token checks |
 | [`auth.api.test.cpp`](tests/auth.api.test.cpp) | 7 | login, a wrong password, the lockout, the greeting, missing, tampered and expired tokens |
 
 `cd "SD Card" && pnpm run test` runs 6 page tests at 100 percent coverage. The page keeps the token in memory only.
@@ -177,7 +180,7 @@ curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/greeting
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 87,496 of 262,144 bytes of flash, 6,184 of 32,768 bytes of RAM |
+| Board | Arduino Uno R4 Minima: 88,324 of 262,144 bytes of flash, 6,224 of 32,768 bytes of RAM |
 | HTTP and auth | Madoguchi: HS256, PBKDF2-HMAC-SHA256, `LoginGuard` |
 | Card | SdFat 2.3.0 |
 | Network | Ethernet 2.0.2 |

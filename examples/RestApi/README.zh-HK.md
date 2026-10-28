@@ -15,8 +15,8 @@
 | 轉接器 | `CardItemRepository` 維護一張 RAM 表，並透過暫存檔把每個項目寫到 `/ITEMn.TXT`；`FlashSecretsAuthority`、`CardFailureLog`、`EepromSessionCounter`；三個控制器。 |
 | 組合 | [`board.composition.h`](src/board.composition.h) 在一處建構所有轉接器及服務。草稿碼、測試、模糊測試目標及主機伺服器都使用它，所以測試走的是真實的接線。 |
 | 網絡 | 附後備位址的 DHCP、保存在 EEPROM 中的 MAC、連結恢復時重啟、透過 mDNS 提供的 `madoguchi.local`。 |
-| 測試 | 五個檔案中的 74 個主機測試、一個模糊測試目標、一個主機伺服器，以及覆蓋率 100% 的 9 個頁面測試。 |
-| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個函式平均 2.03 個斷言。 |
+| 測試 | 五個檔案中的 86 個主機測試、一個模糊測試目標、一個主機伺服器，以及覆蓋率 100% 的 9 個頁面測試。 |
+| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個函式平均 2.10 個斷言。 |
 
 ## 架構
 
@@ -133,13 +133,20 @@ RestApi/
 | 可以做的事 | 現在不做的原因 | 照現狀發佈的風險 |
 |:-----------|:---------------|:-----------------|
 | TLS | 開發板沒有 TLS 協定堆疊 | 權杖以明文在網絡上傳送 |
-| POST 的冪等鍵 | 只有四個欄位；一次重試只佔一個 | 重試的 POST 會建立第二個項目 |
 | 多於一個用戶的角色 | 一個擁有者足以示範 | 任何權杖都能做任何事 |
 
 ## 假設
 
 - 網絡足夠可信，可以傳送明文密碼。
 - [`arduino_secrets.h`](arduino_secrets.h) 以 `python3 -m tools.madogen secrets examples/RestApi --user admin` 產生，真正的檔案從不提交。
+
+## 登入及安全寫入
+
+同一客戶端位址登入失敗五次，該位址會以 `429` 及 `Retry-After` 鎖定 15 分鐘，其他位址仍可登入。表中保存四個位址，四個都被鎖定時新位址亦被鎖定，所以輪換位址無法解除鎖定。 每個位址的次數寫入 `/LOGIN.TXT`，所以鎖定在重啟後依然有效。
+
+附項目的回應會傳送強 `ETag`，由每次啟動的隨機基數、id 及每次寫入都會增加的修訂號組成。把它放在 `If-Match` 中傳回，如果之後有人改過該項目，寫入會回應 `412 Precondition Failed`，而不是覆寫對方的修改。
+
+`POST` 支援 `Idempotency-Key: "<1 至 64 個字元>"`。相同鍵及相同請求主體的重試會回應 `201` 並傳回第一次請求建立的項目；相同鍵但請求主體不同則回應 `422`。開發板記住最近八個鍵，保存在 `/KEYS.TXT` 中，所以重啟後的重試仍能找到其項目。
 
 ## 測試
 
@@ -150,11 +157,11 @@ ctest --test-dir build -R '^RestApi\.' --output-on-failure
 
 | 檔案 | 測試數目 | 涵蓋內容 |
 |:-----|------:|:---------|
-| [`items.domain.test.cpp`](tests/items.domain.test.cpp) | 6 | 數值範圍、空名稱、合併修改、空修改及無效修改 |
+| [`items.domain.test.cpp`](tests/items.domain.test.cpp) | 8 | 數值範圍、空名稱、合併修改、空修改及無效修改 |
 | [`items.repository.test.cpp`](tests/items.repository.test.cpp) | 5 | 項目檔案、啟動時載入、遺忘已刪除的項目、被拒絕的保存、沒有記憶卡 |
-| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 7 | 工作階段、登入、記憶卡上的失敗次數、跨重啟的鎖定、權杖檢查 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | 工作階段、登入、記憶卡上的失敗次數、跨重啟的鎖定、權杖檢查 |
 | [`audit.journal.test.cpp`](tests/audit.journal.test.cpp) | 5 | 跨越回繞的回應時間、每個回應一行、清除、沒有記憶卡 |
-| [`api.http.test.cpp`](tests/api.http.test.cpp) | 51 | 頁面及 gzip、每個路由、權杖關卡、鎖定、日誌、重啟 |
+| [`api.http.test.cpp`](tests/api.http.test.cpp) | 59 | 頁面及 gzip、每個路由、權杖關卡、鎖定、日誌、重啟 |
 
 模糊測試目標 [`rest_fuzz.cpp`](../../tests/fuzz/rest_fuzz.cpp) 及主機伺服器 [`main.cpp`](../../tests/host_server/main.cpp) 運行同一個 `Board`。`cd "SD Card" && pnpm run test` 以 100% 覆蓋率執行 9 個頁面測試。
 
@@ -186,7 +193,7 @@ cd "SD Card" && pnpm install && pnpm run build
 
 | 類別 | 技術 |
 |:-----|:-----|
-| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 107,364 位元組，RAM 32,768 位元組中用 6,648 位元組 |
+| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 110,600 位元組，RAM 32,768 位元組中用 7,328 位元組 |
 | HTTP 及認證 | Madoguchi：HS256、PBKDF2-HMAC-SHA256、`LoginGuard`、`SdLog`、mDNS |
 | 記憶卡 | SdFat 2.3.0 |
 | 網絡 | Ethernet 2.0.2 |

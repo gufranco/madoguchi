@@ -15,7 +15,7 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Composition root | [`RestPost.ino`](RestPost.ino) builds the repository, mounts the card and attaches both to the router. |
 | Contract | [`openapi.json`](openapi.json) generates the route, the body reader and the JSON writer in [`api.generated.h`](src/http/api.generated.h). |
 | Errors | Every refusal is an RFC 9457 problem: `400`, `413`, `415`, `422` or `507`. |
-| Tests | 29 host tests in three files and 7 page tests with 100 percent coverage. |
+| Tests | 54 host tests in five files and 7 page tests with 100 percent coverage. |
 | Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.14 assertions per function. |
 
 ## Architecture
@@ -59,6 +59,7 @@ RestPost/
   src/
     http/api.generated.h                   route, limits, body reader, JSON writer, generated
     http/api.router.h                      the create route, card pages for every other path
+    identity/...                           sign-in, the same code as RestAuth
     items/domain/item.entity.h             Item, ItemDraft, id range and name rules
     items/application/item_repository.port.h   the calls a repository must offer
     items/application/item_catalog.service.h   use cases: add, find
@@ -72,7 +73,7 @@ Files use `name.type.h`, so the suffix says what a file holds before you open it
 
 ## API endpoints
 
-No route needs authentication.
+Every `/api` route except the login needs a bearer token; see Sign-in and safe writes.
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
@@ -131,8 +132,18 @@ The API has no GET by id, so the generator emits no URL helper. The controller w
 
 ## Assumptions
 
-- The network is trusted: there is no authentication and no TLS.
+- The network is trusted enough for clear-text passwords and tokens: there is no TLS.
 - One client at a time: `mado::Server` answers one connection per `loop`.
+
+## Sign-in and safe writes
+
+Every `/api` route except `POST /api/auth/login` needs a bearer token. Sign in with `{"username":"admin","password":"..."}` for a token valid for 15 minutes and until the board restarts; a missing, wrongly signed or stale token answers `401` with `WWW-Authenticate: Bearer`.
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts of each address are written to `/LOGIN.TXT`, so a lock survives a restart.
+
+Write the account into [`arduino_secrets.h`](arduino_secrets.h) before building with `python3 -m tools.madogen secrets examples/RestPost --user admin`; the committed file is an all-zero placeholder that answers `503` to every sign-in.
+
+`POST` honours `Idempotency-Key: "<1 to 64 characters>"`. A retry with the same key and body answers `201` with the item the first request created; the same key with a different body answers `422`. The board remembers the last eight keys in RAM, where the items live too.
 
 ## Testing
 
@@ -145,7 +156,9 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 |:-----|------:|:-------|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | name rules, the id range, building an item |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add, a full table, find |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 14 | `201` and `Location`, id order, `507`, eight refused bodies, the empty name |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 20 | `201` and `Location`, id order, `507`, eight refused bodies, the empty name |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | the EEPROM counter, sign-in, failures per address on the card, a lockout across a restart, token checks |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | credential rules, the session counter, token end times |
 
 `cd "SD Card" && pnpm run test` runs 7 page tests at 100 percent coverage.
 
@@ -163,6 +176,7 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 ## Getting started
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestPost --user admin && cd examples/RestPost
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -172,14 +186,15 @@ cd "SD Card" && pnpm install && pnpm run build
 Copy `SD Card/dist` to the card, then:
 
 ```bash
-curl -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
 ```
 
 ## Tech stack
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 77,032 of 262,144 bytes of flash, 5,904 of 32,768 bytes of RAM |
+| Board | Arduino Uno R4 Minima: 90,816 of 262,144 bytes of flash, 6,928 of 32,768 bytes of RAM |
 | HTTP | Madoguchi, heap-free C++11 |
 | Card | SdFat 2.3.0 |
 | Network | Ethernet 2.0.2 |

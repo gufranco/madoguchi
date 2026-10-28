@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { answer, fakeBoard, problem } from "./testing.ts";
+import { answer, fakeBoard, problem, signInOn, TEST_TOKEN, tokenAnswer } from "./testing.ts";
 
 const PAGE =
   '<!doctype html><html><body><form><input id="name"></form><p role="status"></p></body></html>';
@@ -89,5 +89,37 @@ describe("fake board", () => {
 
     // Assert
     expect(clicks).toBe(1);
+  });
+
+  it("answers a sign-in with the test token", async () => {
+    // Arrange
+    const response = tokenAnswer();
+
+    // Act
+    const body = (await response.json()) as { readonly access_token: string };
+
+    // Assert
+    expect(response.status).toBe(200);
+    expect(body.access_token).toBe(TEST_TOKEN);
+  });
+
+  it("fills and sends the sign-in form", () => {
+    // Arrange
+    const board = fakeBoard(
+      '<!doctype html><form id="login"><input id="username"><input id="password"></form>',
+      [],
+    );
+    let sent = 0;
+    board.window.document.querySelector("#login")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      sent += 1;
+    });
+
+    // Act
+    signInOn(board);
+
+    // Assert
+    expect(board.input("username").value).toBe("admin");
+    expect(sent).toBe(1);
   });
 });

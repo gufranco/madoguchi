@@ -15,8 +15,8 @@ Arduino Uno R4 Minimaで動く、SDカードを消去してSdFat用にフォー�
 | アダプター | `SdFatCardDriver`は`SdCardFactory`、`FatFormatter`、`ExFatFormatter`、`FsVolume`を包み、`FormatController`はフラッシュの表で列挙値を名前にします。 |
 | コンポジションルート | [`RestFormat.ino`](RestFormat.ino)がサービスを組み立ててルーターにつなぎ、`loop`ごとに`step`を1回呼びます。 |
 | ページ | ありません。APIはJSONだけを返します。 |
-| テスト | 偽のセクターデバイスを相手にした2ファイルのホストテスト34件。 |
-| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.07個のアサーション。 |
+| テスト | 偽のセクターデバイスを相手にした4ファイルのホストテスト55件。 |
+| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.06個のアサーション。 |
 
 ## アーキテクチャ
 
@@ -50,6 +50,7 @@ RestFormat/
   openapi.json                                 API契約、x-mado-cardはfalse
   src/http/api.generated.h                     生成
   src/http/api.router.h                        3つのルート、カードのページなし
+  src/identity/...                             ログイン。RestAuthと同じコード
   src/card/domain/file_system.policy.h         ファイルシステム、カードの種類、容量
   src/card/domain/format_phase.entity.h        段階、失敗、進み具合
   src/card/application/card_driver.port.h      CardDriverPort
@@ -62,7 +63,7 @@ RestFormat/
 
 ## APIエンドポイント
 
-認証が必要なルートはありません。
+ログインを除くすべての`/api`ルートにベアラートークンが必要です。ログインと安全な書き込みの節を参照してください。
 
 | メソッド | エンドポイント | 説明 |
 |:---------|:---------------|:-----|
@@ -118,14 +119,21 @@ RestFormat/
 
 | できること | 今はしない理由 | このままのリスク |
 |:-----------|:---------------|:-----------------|
-| 認証 | このサンプルは消去を示し、トークンはRestApiが示す | ネットワーク上の誰でもカードを消せる |
 | 取り消しのルート | 途中まで消したカードはどのみち使えない | 始めた消去は最後か失敗まで続く |
 | 消去時間の測定 | 本物のSDSC、SDHC、SDXCのカードが要る | 消去にかかる時間はわからない |
 
 ## 前提
 
-- ネットワークは信頼できる。認証もTLSもない。
+- ネットワークは平文のパスワードとトークンを送れる程度に信頼できる。TLSはない。
 - カードはシールドのSPIバスにあり、チップセレクトは4番ピン。
+
+## ログインと安全な書き込み
+
+`POST /api/auth/login`を除くすべての`/api`ルートにベアラートークンが必要です。`{"username":"admin","password":"..."}`でログインすると、15分間かつボードが再起動するまで有効なトークンが返ります。トークンがない、署名が違う、古い場合は`WWW-Authenticate: Bearer`付きの`401`を返します。
+
+1つのクライアントアドレスからログインに5回失敗すると、そのアドレスは`429`と`Retry-After`で15分間ロックされ、ほかのアドレスはログインを続けられます。表は4つのアドレスを持ち、4つすべてがロック中の間は新しいアドレスもロックされるので、アドレスを替えてもロックは解けません。 回数はRAMにだけ置きます。カードはこのサンプルが消去する対象だからです。
+
+ビルドの前に`python3 -m tools.madogen secrets examples/RestFormat --user admin`でアカウントを[`arduino_secrets.h`](arduino_secrets.h)に書き込みます。コミットされているファイルはすべてゼロの仮の値で、ログインには必ず`503`を返します。
 
 ## テスト
 
@@ -137,7 +145,9 @@ ctest --test-dir build -R '^RestFormat\.' --output-on-failure
 | ファイル | テスト数 | 対象 |
 |:---------|---------:|:-----|
 | [`card.domain.test.cpp`](tests/card.domain.test.cpp) | 8 | 段階の順序、両方のパターン、1回目の途中のパーセント、迷い込んだバイト、カードの種類、容量 |
-| [`format.api.test.cpp`](tests/format.api.test.cpp) | 26 | ファイルシステムの境界、カードの説明、後から挿したカード、拒否された開始、消去全体、進み具合、すべての失敗 |
+| [`format.api.test.cpp`](tests/format.api.test.cpp) | 28 | ファイルシステムの境界、カードの説明、後から挿したカード、拒否された開始、消去全体、進み具合、すべての失敗 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROMカウンター、ログイン、カード上のアドレスごとの失敗回数、再起動をまたぐロックアウト、トークンの確認 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 認証情報の規則、セッションカウンター、トークンの終了時刻 |
 
 ## 前提条件
 
@@ -152,18 +162,20 @@ ctest --test-dir build -R '^RestFormat\.' --output-on-failure
 ## はじめに
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestFormat --user admin && cd examples/RestFormat
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
-curl http://192.168.1.177/api/card
-curl -X POST -H 'Content-Type: application/json' -d '{"capacity_mib":1024}' http://192.168.1.177/api/card/format
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/card
+curl -H "Authorization: Bearer $TOKEN" -X POST -H 'Content-Type: application/json' -d '{"capacity_mib":1024}' http://192.168.1.177/api/card/format
 ```
 
 ## 技術スタック
 
 | 分類 | 技術 |
 |:-----|:-----|
-| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中71,852バイト、RAM 32,768バイト中9,936バイト、うち4 KiBがセクターバッファー |
+| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中92,456バイト、RAM 32,768バイト中10,344バイト、うち4 KiBがセクターバッファー |
 | HTTP | Madoguchi、ヒープを使わないC++11 |
 | カード | SdFat 2.3.0：`SdCardFactory`、`FatFormatter`、`ExFatFormatter`、`FsVolume` |
 | ネットワーク | Ethernet 2.0.2 |

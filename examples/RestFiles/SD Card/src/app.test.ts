@@ -2,7 +2,15 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { faker } from "@faker-js/faker";
-import { answer, type FakeBoard, fakeBoard, problem } from "@madoguchi/kit/testing";
+import {
+  answer,
+  type FakeBoard,
+  fakeBoard,
+  problem,
+  signInOn,
+  TEST_TOKEN,
+  tokenAnswer,
+} from "@madoguchi/kit/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { type FilesHost, start } from "./app.ts";
@@ -138,6 +146,29 @@ describe("RestFiles page", () => {
       },
     ]);
     expect(board.window.document.querySelector("#progress")?.getAttribute("value")).toBe("5");
+  });
+
+  it("signs in and sends the token with an upload", async () => {
+    // Arrange
+    const board = fakeBoard(PAGE, [
+      answer(200, []),
+      tokenAnswer(),
+      answer(200, []),
+      answer(200, []),
+    ]);
+    const files = filesHost(board, { status: 201, type: "", text: "" });
+    start(files.host);
+    signInOn(board);
+    await expect.poll(() => board.calls().length).toBe(3);
+    choose(board, "hello.txt", "hello");
+
+    // Act
+    board.submit("#upload");
+
+    // Assert
+    await expect.poll(() => board.text(STATUS)).toBe("Uploaded hello.txt.");
+    expect(files.sent()[0]?.headers["authorization"]).toBe(`Bearer ${TEST_TOKEN}`);
+    expect(board.calls()[1]?.path).toBe("/api/auth/login");
   });
 
   it("refuses a name the card cannot store before uploading", async () => {

@@ -14,8 +14,8 @@
 | 用例 | `FileLibrary` 按需挂载卡，列出、打开文件，通过临时文件并计算 SHA-256 来保存，以及删除。每次写入都会改变的版本号是 ETag 的来源。 |
 | 适配器 | `FilesController` 把 HTTP、范围请求、ETag 和下载映射到用例；`percent.encoding.h` 写出新文件的 `Location`。 |
 | 组合根 | [`RestFiles.ino`](RestFiles.ino) 用模拟噪声生成版本种子，构建文件库，并启动 DHCP 和 `madofiles.local` 的 mDNS。 |
-| 测试 | 两个文件中的 29 个主机测试、一个 libFuzzer 目标，以及分支覆盖率 96% 的 20 个页面测试。 |
-| 规则 | JPL D-60411 与 Power of Ten：不用堆、不用虚函数、不用函数指针，每个函数平均 2.03 个断言。 |
+| 测试 | 四个文件中的 55 个主机测试、一个 libFuzzer 目标，以及分支覆盖率 96% 的 21 个页面测试。 |
+| 规则 | JPL D-60411 与 Power of Ten：不用堆、不用虚函数、不用函数指针，每个函数平均 2.05 个断言。 |
 
 ## 架构
 
@@ -50,6 +50,7 @@ RestFiles/
   openapi.json                                 API 契约
   src/http/api.generated.h                     由工具生成
   src/http/api.router.h                        四个文件路由、卡上的页面
+  src/identity/...                             登录，与 RestAuth 相同的代码
   src/files/domain/file_path.value.h           FilePath、is_file_path
   src/files/domain/upload.policy.h             upload_fits、DigestClaim、digest_accepted
   src/files/application/file_card.port.h       FileCardPort
@@ -62,7 +63,7 @@ RestFiles/
 
 ## API 端点
 
-所有路由都不需要认证。
+列出和下载是公开的；上传和删除需要持有者令牌，见“登录与安全写入”一节。
 
 | 方法 | 端点 | 说明 |
 |:-----|:-----|:-----|
@@ -101,7 +102,7 @@ RestFiles/
 
 ### 版本放在用例中
 
-每次写入、删除或重新挂载成功，`FileLibrary` 的版本都会增加。`open` 把它放在 `mado::FileStamp` 中返回，控制器用大小和版本生成弱 ETag。种子来自启动时的模拟噪声，所以在开发板断电期间被修改的文件，不会与重启前的标签匹配。
+每次写入、删除或重新挂载成功，`FileLibrary` 的版本都会增加。`open` 把它放在 `mado::FileStamp` 中返回，控制器用大小和版本生成强 ETag。种子来自启动时的模拟噪声，所以在开发板断电期间被修改的文件，不会与重启前的标签匹配。
 
 ### 长文件名只在一处检查
 
@@ -111,15 +112,24 @@ RestFiles/
 
 | 可以做的事 | 现在不做的原因 | 照现状发布的风险 |
 |:-----------|:---------------|:-----------------|
-| 认证 | RestApi 和 RestAuth 演示了认证 | 网络上任何人都能读取、替换和删除文件 |
 | 根目录以下的文件夹 | 列表和名称都是扁平的 | 子文件夹中的文件只能通过页面访问 |
 | 列表中超过 32 个条目 | 上限让循环的终止可以证明 | 第 33 个及以后的条目不会列出 |
 
 ## 假设
 
-- 网络是可信的：没有认证，也没有 TLS。
+- 网络足够可信，可以传输明文密码和令牌：没有 TLS。
 - 卡是 SdFat 能读取的 FAT16、FAT32 或 exFAT。
-- 上传来自会计算 `Repr-Digest` 的页面；不带它的 curl 上传会不经校验地被接受。
+- 每次上传都带 `Repr-Digest`；页面会自动计算，curl 需要手动计算。
+
+## 登录与安全写入
+
+列出和下载保持公开，所以页面的下载链接照常可用。`PUT` 和 `DELETE` 需要持有者令牌：用 `{"username":"admin","password":"..."}` 登录，得到 15 分钟内且开发板重启前有效的令牌；没有令牌时应答带 `WWW-Authenticate: Bearer` 的 `401`。
+
+同一客户端地址登录失败五次，该地址会以 `429` 和 `Retry-After` 锁定 15 分钟，其他地址仍可登录。表中保存四个地址，四个都被锁定时新地址也被锁定，所以轮换地址无法解除锁定。 每个地址的次数写入 `/LOGIN.TXT`，所以锁定在重启后依然有效。
+
+构建前用 `python3 -m tools.madogen secrets examples/RestFiles --user admin` 把账户写入 [`arduino_secrets.h`](arduino_secrets.h)；提交的文件是全零的占位值，对每次登录都应答 `503`。
+
+`GET` 发送由名称、大小和版本组成的强 `ETag`，版本在每次写入、删除和重新挂载时增加，所以 `If-Range` 现在可以续传下载。在 `PUT` 的 `If-Match` 中发送该标签，如果文件之后被改过，上传会应答 `412`。没有 `Repr-Digest: sha-256=:<base64>:` 的上传应答 `400`。
 
 ## 测试
 
@@ -131,9 +141,11 @@ ctest --test-dir build -R '^RestFiles\.' --output-on-failure
 | 文件 | 测试数 | 覆盖内容 |
 |:-----|------:|:---------|
 | [`files.domain.test.cpp`](tests/files.domain.test.cpp) | 7 | 长文件名、保留字符、8 MiB 上限、摘要、`Location` 编码 |
-| [`files.api.test.cpp`](tests/files.api.test.cpp) | 22 | 列表、范围请求、ETag 与 `304`、下载、带或不带摘要的上传、被拒绝的写入和删除、延后插入的卡 |
+| [`files.api.test.cpp`](tests/files.api.test.cpp) | 29 | 列表、范围请求、ETag 与 `304`、下载、带或不带摘要的上传、被拒绝的写入和删除、延后插入的卡 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 计数器、登录、卡上按地址记录的失败次数、跨重启的锁定、令牌检查 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 凭据规则、会话计数器、令牌结束时间 |
 
-模糊测试目标 [`files_fuzz.cpp`](../../tests/fuzz/files_fuzz.cpp) 向同一个路由器发送随机请求。`cd "SD Card" && pnpm run test` 运行 20 个页面测试。
+模糊测试目标 [`files_fuzz.cpp`](../../tests/fuzz/files_fuzz.cpp) 向同一个路由器发送随机请求。`cd "SD Card" && pnpm run test` 运行 21 个页面测试。
 
 ## 前提条件
 
@@ -149,6 +161,7 @@ ctest --test-dir build -R '^RestFiles\.' --output-on-failure
 ## 快速开始
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestFiles --user admin && cd examples/RestFiles
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -158,7 +171,8 @@ cd "SD Card" && pnpm install && pnpm run build
 开发板向 DHCP 请求地址，失败时使用 `192.168.1.178`。它以 `madofiles.local` 应答：
 
 ```bash
-curl -T notes.txt http://madofiles.local/api/files/notes.txt
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://madofiles.local/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -T notes.txt -H "Authorization: Bearer $TOKEN" -H "Repr-Digest: sha-256=:$(openssl dgst -sha256 -binary notes.txt | base64):" http://madofiles.local/api/files/notes.txt
 curl http://madofiles.local/api/files
 ```
 
@@ -166,7 +180,7 @@ curl http://madofiles.local/api/files
 
 | 类别 | 技术 |
 |:-----|:-----|
-| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 94,472 字节，RAM 32,768 字节中用 6,944 字节 |
+| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 104,108 字节，RAM 32,768 字节中用 7,048 字节 |
 | HTTP | Madoguchi：范围请求、ETag、SHA-256、mDNS、DHCP 备用地址 |
 | 卡 | 支持长文件名的 SdFat 2.3.0 |
 | 网络 | Ethernet 2.0.2 |

@@ -1,4 +1,5 @@
 GET /api/files/HELLO.TXT?download=1 HTTP/1.1
 Host: mado.test
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInNlcyI6NywiZW5kIjo5MDB9.9PQ6D5Wpr82DfguGZcQy8Q8cfHT24Tg0qGQ3xAtxJDQ
 If-None-Match: W/"0-0"
 

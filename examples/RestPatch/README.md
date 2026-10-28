@@ -15,8 +15,8 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Adapters | `RamItemRepository` on a `mado::SlotTable`; `ItemsController` turns the generated presence mask into an `ItemChange`. |
 | Composition root | [`RestPatch.ino`](RestPatch.ino) seeds "lamp" and "fan", mounts the card and attaches both to the router. |
 | Contract | [`openapi.json`](openapi.json) declares `ItemPatch` with no required field; [`api.generated.h`](src/http/api.generated.h) reads it into a struct plus a bit mask. |
-| Tests | 30 host tests in four files and 15 page tests with 100 percent coverage. |
-| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.10 assertions per function. |
+| Tests | 56 host tests in six files and 15 page tests with 100 percent coverage. |
+| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.08 assertions per function. |
 
 ## Architecture
 
@@ -56,6 +56,7 @@ RestPatch/
   openapi.json                             API contract
   src/http/api.generated.h                 generated
   src/http/api.router.h                    the update route, card pages for every other path
+  src/identity/...                         sign-in, the same code as RestAuth
   src/items/domain/item.entity.h           Item, ItemChange, change_status, changed
   src/items/application/item_repository.port.h
   src/items/application/item_catalog.service.h   add, find, change
@@ -114,13 +115,22 @@ The use case needs `store(const Item&)` on top of RestGet's `insert` and `find`.
 | What could be done | Why it is not done | Risk as shipped |
 |:-------------------|:-------------------|:----------------|
 | JSON Merge Patch with `null` to clear a field | No field here can be cleared | `null` answers `422` |
-| `If-Match` with an ETag | Single client, four items | Two clients can overwrite each other |
 | Keep items on the card | RestApi shows persistence | Items reset to the seeds on every boot |
 
 ## Assumptions
 
-- The network is trusted: there is no authentication and no TLS.
+- The network is trusted enough for clear-text passwords and tokens: there is no TLS.
 - One client at a time.
+
+## Sign-in and safe writes
+
+Every `/api` route except `POST /api/auth/login` needs a bearer token. Sign in with `{"username":"admin","password":"..."}` for a token valid for 15 minutes and until the board restarts; a missing, wrongly signed or stale token answers `401` with `WWW-Authenticate: Bearer`.
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts of each address are written to `/LOGIN.TXT`, so a lock survives a restart.
+
+Write the account into [`arduino_secrets.h`](arduino_secrets.h) before building with `python3 -m tools.madogen secrets examples/RestPatch --user admin`; the committed file is an all-zero placeholder that answers `503` to every sign-in.
+
+Responses that carry an item send a strong `ETag` built from a boot-random base, the id and a revision that every write raises. Send it back in `If-Match` and a write answers `412 Precondition Failed` when someone changed the item since, instead of overwriting their change.
 
 ## Testing
 
@@ -133,8 +143,10 @@ ctest --test-dir build -R '^RestPatch\.' --output-on-failure
 |:-----|------:|:-------|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | name rules, the id range, building an item |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add, a full table, find |
-| [`item_change.test.cpp`](tests/item_change.test.cpp) | 5 | an empty change, an empty name, a switch that keeps the name, a stored rename, a free id |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 10 | one field, a rename, refused bodies, broken JSON, a free id, `{}` |
+| [`item_change.test.cpp`](tests/item_change.test.cpp) | 7 | an empty change, an empty name, a switch that keeps the name, a stored rename, a free id |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 15 | one field, a rename, refused bodies, broken JSON, a free id, `{}` |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | the EEPROM counter, sign-in, failures per address on the card, a lockout across a restart, token checks |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | credential rules, the session counter, token end times |
 
 `cd "SD Card" && pnpm run test` runs 15 page tests at 100 percent coverage.
 
@@ -152,6 +164,7 @@ ctest --test-dir build -R '^RestPatch\.' --output-on-failure
 ## Getting started
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestPatch --user admin && cd examples/RestPatch
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -161,14 +174,15 @@ cd "SD Card" && pnpm install && pnpm run build
 Copy `SD Card/dist` to the card, then:
 
 ```bash
-curl -X PATCH -H 'Content-Type: application/json' -d '{"on":false}' http://192.168.1.177/api/items/1
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -X PATCH -H 'Content-Type: application/json' -d '{"on":false}' http://192.168.1.177/api/items/1
 ```
 
 ## Tech stack
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 77,692 of 262,144 bytes of flash, 5,904 of 32,768 bytes of RAM |
+| Board | Arduino Uno R4 Minima: 91,656 of 262,144 bytes of flash, 6,332 of 32,768 bytes of RAM |
 | HTTP | Madoguchi, heap-free C++11 |
 | Card | SdFat 2.3.0 |
 | Network | Ethernet 2.0.2 |

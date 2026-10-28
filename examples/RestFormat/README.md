@@ -15,8 +15,8 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 | Adapters | `SdFatCardDriver` wraps `SdCardFactory`, `FatFormatter`, `ExFatFormatter` and `FsVolume`; `FormatController` turns enums into names through flash tables. |
 | Composition root | [`RestFormat.ino`](RestFormat.ino) builds the service, attaches it to the router and calls `step` once per `loop`. |
 | Pages | None. The API answers JSON only. |
-| Tests | 34 host tests in two files against a fake sector device. |
-| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.07 assertions per function. |
+| Tests | 55 host tests in four files against a fake sector device. |
+| Rules | JPL D-60411 and the Power of Ten: no heap, no virtual functions, no function pointers, 2.06 assertions per function. |
 
 ## Architecture
 
@@ -50,6 +50,7 @@ RestFormat/
   openapi.json                                 API contract, x-mado-card false
   src/http/api.generated.h                     generated
   src/http/api.router.h                        three routes, no card pages
+  src/identity/...                             sign-in, the same code as RestAuth
   src/card/domain/file_system.policy.h         file system, card kind, capacity
   src/card/domain/format_phase.entity.h        phases, failures, progress
   src/card/application/card_driver.port.h      CardDriverPort
@@ -62,7 +63,7 @@ RestFormat/
 
 ## API endpoints
 
-No route needs authentication.
+Every `/api` route except the login needs a bearer token; see Sign-in and safe writes.
 
 | Method | Endpoint | Description |
 |:-------|:---------|:------------|
@@ -118,14 +119,21 @@ Phases, kinds, file systems and failures map to text through `PROGMEM` tables re
 
 | What could be done | Why it is not done | Risk as shipped |
 |:-------------------|:-------------------|:----------------|
-| Authentication | The example shows the wipe; RestApi shows tokens | Anyone on the network can erase the card |
 | A cancel route | A half-wiped card is unusable either way | A started wipe runs to the end or to a failure |
 | Measured wipe times | Needs real SDSC, SDHC and SDXC cards | The time a wipe takes is unknown |
 
 ## Assumptions
 
-- The network is trusted: there is no authentication and no TLS.
+- The network is trusted enough for clear-text passwords and tokens: there is no TLS.
 - The card sits on the shield's SPI bus with chip select on pin 4.
+
+## Sign-in and safe writes
+
+Every `/api` route except `POST /api/auth/login` needs a bearer token. Sign in with `{"username":"admin","password":"..."}` for a token valid for 15 minutes and until the board restarts; a missing, wrongly signed or stale token answers `401` with `WWW-Authenticate: Bearer`.
+
+Five failed sign-ins from one client address lock that address for 15 minutes with `429` and `Retry-After`; other addresses keep signing in. The table holds four addresses, and while all four are locked a new address is locked too, so cycling addresses cannot clear a lock. The counts stay in RAM, because the card is the device this example erases.
+
+Write the account into [`arduino_secrets.h`](arduino_secrets.h) before building with `python3 -m tools.madogen secrets examples/RestFormat --user admin`; the committed file is an all-zero placeholder that answers `503` to every sign-in.
 
 ## Testing
 
@@ -137,7 +145,9 @@ ctest --test-dir build -R '^RestFormat\.' --output-on-failure
 | File | Tests | Covers |
 |:-----|------:|:-------|
 | [`card.domain.test.cpp`](tests/card.domain.test.cpp) | 8 | the phase order, both patterns, percent halfway through the first pass, a stray byte, card kinds, capacity |
-| [`format.api.test.cpp`](tests/format.api.test.cpp) | 26 | file system boundaries, card descriptions, a late card, refused starts, a full wipe, progress, every failure |
+| [`format.api.test.cpp`](tests/format.api.test.cpp) | 28 | file system boundaries, card descriptions, a late card, refused starts, a full wipe, progress, every failure |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | the EEPROM counter, sign-in, failures per address on the card, a lockout across a restart, token checks |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | credential rules, the session counter, token end times |
 
 ## Prerequisites
 
@@ -152,18 +162,20 @@ ctest --test-dir build -R '^RestFormat\.' --output-on-failure
 ## Getting started
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestFormat --user admin && cd examples/RestFormat
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
-curl http://192.168.1.177/api/card
-curl -X POST -H 'Content-Type: application/json' -d '{"capacity_mib":1024}' http://192.168.1.177/api/card/format
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/card
+curl -H "Authorization: Bearer $TOKEN" -X POST -H 'Content-Type: application/json' -d '{"capacity_mib":1024}' http://192.168.1.177/api/card/format
 ```
 
 ## Tech stack
 
 | Category | Technology |
 |:---------|:-----------|
-| Board | Arduino Uno R4 Minima: 71,852 of 262,144 bytes of flash, 9,936 of 32,768 bytes of RAM, 4 KiB of it the sector buffer |
+| Board | Arduino Uno R4 Minima: 92,456 of 262,144 bytes of flash, 10,344 of 32,768 bytes of RAM, 4 KiB of it the sector buffer |
 | HTTP | Madoguchi, heap-free C++11 |
 | Card | SdFat 2.3.0: `SdCardFactory`, `FatFormatter`, `ExFatFormatter`, `FsVolume` |
 | Network | Ethernet 2.0.2 |

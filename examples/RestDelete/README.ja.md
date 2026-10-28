@@ -14,8 +14,8 @@
 | アダプター | `mado::SlotTable`上の`RamItemRepository`。`ItemsController`は結果を`204`または`404`に対応づけます。 |
 | コンポジションルート | [`RestDelete.ino`](RestDelete.ino)が「lamp」と「fan」を投入し、カードをマウントし、両方をルーターに渡します。 |
 | 契約 | [`openapi.json`](openapi.json)から[`api.generated.h`](src/http/api.generated.h)のルートとパスのid解析を生成します。 |
-| テスト | 4ファイルのホストテスト23件と、カバレッジ100パーセントのページテスト2件。 |
-| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.06個のアサーション。 |
+| テスト | 6ファイルのホストテスト44件と、カバレッジ100パーセントのページテスト2件。 |
+| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.05個のアサーション。 |
 
 ## アーキテクチャ
 
@@ -55,6 +55,7 @@ RestDelete/
   openapi.json                             API契約
   src/http/api.generated.h                 生成
   src/http/api.router.h                    削除のルート、それ以外のパスはカードのページ
+  src/identity/...                         ログイン。RestAuthと同じコード
   src/items/domain/item.entity.h           Item、ItemDraft、idの範囲と名前のルール
   src/items/application/item_repository.port.h
   src/items/application/item_catalog.service.h   add、find、remove
@@ -97,12 +98,19 @@ DELETEの効果は冪等です。2回目の呼び出しはテーブルを1回目
 |:-----------|:---------------|:-----------------|
 | 復元ルート付きの論理削除 | 動詞のサンプルの範囲外 | 削除した項目は次の起動まで戻らない |
 | テーブルをカードに保存する | 永続化はRestApiが示す | 削除した初期データは起動のたびに戻る |
-| DELETEの認証 | ベアラートークンはRestApiが示す | ネットワーク上の誰でも削除できる |
 
 ## 前提
 
-- ネットワークは信頼できる。認証もTLSもない。
+- ネットワークは平文のパスワードとトークンを送れる程度に信頼できる。TLSはない。
 - 同時に扱うクライアントは1つ。
+
+## ログインと安全な書き込み
+
+`POST /api/auth/login`を除くすべての`/api`ルートにベアラートークンが必要です。`{"username":"admin","password":"..."}`でログインすると、15分間かつボードが再起動するまで有効なトークンが返ります。トークンがない、署名が違う、古い場合は`WWW-Authenticate: Bearer`付きの`401`を返します。
+
+1つのクライアントアドレスからログインに5回失敗すると、そのアドレスは`429`と`Retry-After`で15分間ロックされ、ほかのアドレスはログインを続けられます。表は4つのアドレスを持ち、4つすべてがロック中の間は新しいアドレスもロックされるので、アドレスを替えてもロックは解けません。 アドレスごとの回数は`/LOGIN.TXT`に書き込まれるので、ロックは再起動後も残ります。
+
+ビルドの前に`python3 -m tools.madogen secrets examples/RestDelete --user admin`でアカウントを[`arduino_secrets.h`](arduino_secrets.h)に書き込みます。コミットされているファイルはすべてゼロの仮の値で、ログインには必ず`503`を返します。
 
 ## テスト
 
@@ -116,7 +124,9 @@ ctest --test-dir build -R '^RestDelete\.' --output-on-failure
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名前のルール、idの範囲、項目の生成 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、満杯のテーブル、find |
 | [`item_removal.test.cpp`](tests/item_removal.test.cpp) | 4 | 削除、2回目の削除、範囲外のid、空いたidの再利用 |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 4 | `204`、2回目の`404`、不正なid、コレクションへの`405` |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 6 | `204`、2回目の`404`、不正なid、コレクションへの`405` |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROMカウンター、ログイン、カード上のアドレスごとの失敗回数、再起動をまたぐロックアウト、トークンの確認 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 認証情報の規則、セッションカウンター、トークンの終了時刻 |
 
 `cd "SD Card" && pnpm run test`はカバレッジ100パーセントで2件のページテストを実行します。
 
@@ -134,6 +144,7 @@ ctest --test-dir build -R '^RestDelete\.' --output-on-failure
 ## はじめに
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestDelete --user admin && cd examples/RestDelete
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -143,14 +154,15 @@ cd "SD Card" && pnpm install && pnpm run build
 `SD Card/dist`をカードにコピーしてから：
 
 ```bash
-curl -i -X DELETE http://192.168.1.177/api/items/2
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -i -X DELETE http://192.168.1.177/api/items/2
 ```
 
 ## 技術スタック
 
 | 分類 | 技術 |
 |:-----|:-----|
-| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中73,856バイト、RAM 32,768バイト中5,904バイト |
+| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中89,076バイト、RAM 32,768バイト中6,312バイト |
 | HTTP | Madoguchi、ヒープを使わないC++11 |
 | カード | SdFat 2.3.0 |
 | ネットワーク | Ethernet 2.0.2 |

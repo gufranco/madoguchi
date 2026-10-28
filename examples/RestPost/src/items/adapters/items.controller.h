@@ -10,6 +10,7 @@
 #include <mado/Reply.h>
 #include <mado/check.h>
 #include <mado/http_status.h>
+#include <mado/parse_idempotency_key.h>
 #include <mado/send_problem.h>
 #include <stdint.h>
 #include <string.h>
@@ -22,20 +23,27 @@ namespace items {
 
 constexpr uint32_t kMaxBody = 256U;
 
-template <typename ExchangeT, typename RepositoryT>
+template <typename ExchangeT, typename RepositoryT, typename LedgerT>
 class ItemsController {
   using Catalog = ItemCatalog<RepositoryT>;
 
  public:
-  static bool create(ExchangeT& exchange, RepositoryT& repository) {
+  static bool create(ExchangeT& exchange, RepositoryT& repository, LedgerT& ledger) {
+    const char* const header = exchange.header(F("Idempotency-Key"));
+    char key[mado::kIdempotencyKeySize] = {};
+    if (!mado::check((header == nullptr) || mado::parse_idempotency_key(header, key))) {
+      return mado::send_problem(exchange, bad_key());
+    }
     rest_post::Item body = {};
     uint8_t present = 0U;
     const mado::Problem problem = rest_post::read_item_body(exchange, body, present, kMaxBody);
     if (!mado::check(problem.status == mado::http::kNoResponse)) {
       return mado::send_problem(exchange, problem);
     }
-    const AddResult result = Catalog::add(repository, draft_of(body));
-    if (!mado::check(result.status == AddStatus::kAdded)) {
+    const AddResult result = Catalog::add_once(repository, ledger, &key[0], draft_of(body));
+    const bool created = mado::check((result.status == AddStatus::kAdded) ||
+                                     (result.status == AddStatus::kReplayed));
+    if (!created) {
       return mado::send_problem(exchange, refusal(result.status));
     }
     mado::Reply<ExchangeT> reply(exchange);
@@ -59,10 +67,25 @@ class ItemsController {
     return (terminated && unnumbered) ? draft : ItemDraft{};
   }
 
+  static_assert(mado::kIdempotencyKeySize == kKeySize, "the header parser and the record agree");
+
+  static mado::Problem bad_key() {
+    return mado::Problem{
+        mado::http::kBadRequest,
+        F("Idempotency-Key must be a quoted string of 1 to 64 characters"),
+    };
+  }
+
   static mado::Problem refusal(const AddStatus status) {
     const bool refused = mado::check(status != AddStatus::kAdded);
     if (refused && mado::check(status == AddStatus::kFull)) {
       return mado::Problem{mado::http::kInsufficientStorage, F("every item slot is taken")};
+    }
+    if (status == AddStatus::kKeyReused) {
+      return mado::Problem{
+          mado::http::kUnprocessableContent,
+          F("this Idempotency-Key was sent before with a different body"),
+      };
     }
     return mado::Problem{mado::http::kUnprocessableContent, F("the name must not be empty")};
   }

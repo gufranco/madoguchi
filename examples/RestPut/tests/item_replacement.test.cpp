@@ -92,4 +92,41 @@ TEST_F(ItemReplacementTest, ReportsAnIdThatHoldsNoItem) {
   EXPECT_EQ(result.status, items::ReplaceStatus::kMissing);
 }
 
+TEST_F(ItemReplacementTest, RaisesTheRevisionOnEveryReplacement) {
+  // Arrange
+  const uint32_t before = Catalog::find(repository(), 1U).item.revision;
+
+  // Act
+  const items::ReplaceResult result =
+      Catalog::replace(repository(), 1U, draft_named(data().word(5U), false));
+
+  // Assert
+  EXPECT_EQ(result.status, items::ReplaceStatus::kReplaced);
+  EXPECT_EQ(result.item.revision, before + 1U);
+  EXPECT_EQ(Catalog::find(repository(), 1U).item.revision, before + 1U);
+}
+
+TEST(ItemRevision, WrapsToOneInsteadOfZero) {
+  // Arrange
+  const uint32_t last = UINT32_MAX;
+
+  // Act
+  const uint32_t next = items::next_revision(last);
+
+  // Assert
+  EXPECT_EQ(next, 1U);
+}
+
+TEST(ItemRevision, StartsFromTheSeedTheRepositoryWasGiven) {
+  // Arrange
+  items::RamItemRepository repository;
+  repository.begin(0x1000U);
+
+  // Act
+  const items::AddResult added = Catalog::add(repository, draft_named("a", true));
+
+  // Assert
+  EXPECT_EQ(added.item.revision, 0x1000U);
+}
+
 }

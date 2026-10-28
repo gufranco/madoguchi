@@ -14,6 +14,12 @@ namespace items {
 
 class RamItemRepository {
  public:
+  void begin(const uint32_t revision_seed) {
+    const bool untouched = mado::check(next_revision_ == 1U);
+    const bool seeded = mado::check(revision_seed != 0U);
+    next_revision_ = (untouched && seeded) ? revision_seed : next_revision_;
+  }
+
   uint8_t insert(const ItemDraft& draft) {
     const uint8_t item_id = table_.insert(Item{});
     Item* const stored = mado::check(item_id != 0U) ? table_.find(item_id) : nullptr;
@@ -21,6 +27,8 @@ class RamItemRepository {
       return 0U;
     }
     *stored = item_from(draft, item_id);
+    stored->revision = next_revision_;
+    next_revision_ = next_revision(next_revision_);
     return mado::check(stored->id == item_id) ? item_id : 0U;
   }
 
@@ -42,6 +50,7 @@ class RamItemRepository {
 
  private:
   mado::SlotTable<Item, kCapacity> table_;
+  uint32_t next_revision_ = 1U;
 };
 
 }

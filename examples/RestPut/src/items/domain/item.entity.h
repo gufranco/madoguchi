@@ -23,6 +23,7 @@ struct Item {
   uint8_t id;
   char name[kNameSize];
   bool on;
+  uint32_t revision;
 };
 
 enum class DraftStatus : uint8_t { kValid, kEmptyName, kUnterminatedName };
@@ -49,10 +50,18 @@ inline Item item_from(const ItemDraft& draft, const uint8_t item_id) {
   return item;
 }
 
+inline uint32_t next_revision(const uint32_t revision) {
+  const bool started = mado::check(revision != 0U);
+  const bool room = mado::check(revision != UINT32_MAX);
+  return (started && room) ? (revision + 1U) : 1U;
+}
+
 inline Item replaced(const Item& current, const ItemDraft& draft) {
   const bool numbered = mado::check(is_item_id(current.id));
   const bool named = mado::check(draft_status(draft) == DraftStatus::kValid);
-  return (numbered && named) ? item_from(draft, current.id) : current;
+  Item next = (numbered && named) ? item_from(draft, current.id) : current;
+  next.revision = (numbered && named) ? next_revision(current.revision) : current.revision;
+  return next;
 }
 
 }

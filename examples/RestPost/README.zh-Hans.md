@@ -15,7 +15,7 @@
 | 组合根 | [`RestPost.ino`](RestPost.ino) 创建仓储，挂载卡，并把两者交给路由器。 |
 | 契约 | [`openapi.json`](openapi.json) 生成 [`api.generated.h`](src/http/api.generated.h) 中的路由、请求体读取器和 JSON 写入函数。 |
 | 错误 | 每次拒绝都是 RFC 9457 问题详情：`400`、`413`、`415`、`422` 或 `507`。 |
-| 测试 | 三个文件中的 29 个主机测试，以及覆盖率 100% 的 7 个页面测试。 |
+| 测试 | 五个文件中的 54 个主机测试，以及覆盖率 100% 的 7 个页面测试。 |
 | 规则 | JPL D-60411 与 Power of Ten：不用堆、不用虚函数、不用函数指针，每个函数平均 2.14 个断言。 |
 
 ## 架构
@@ -59,6 +59,7 @@ RestPost/
   src/
     http/api.generated.h                   路由、上限、请求体读取器、JSON 写入，由工具生成
     http/api.router.h                      创建路由，其余路径交给卡上的页面
+    identity/...                           登录，与 RestAuth 相同的代码
     items/domain/item.entity.h             Item、ItemDraft、id 范围和名称规则
     items/application/item_repository.port.h   仓储必须提供的调用
     items/application/item_catalog.service.h   用例：add、find
@@ -72,7 +73,7 @@ RestPost/
 
 ## API 端点
 
-所有路由都不需要认证。
+除登录外，每个 `/api` 路由都需要持有者令牌，见“登录与安全写入”一节。
 
 | 方法 | 端点 | 说明 |
 |:-----|:-----|:-----|
@@ -125,14 +126,23 @@ RestPost/
 
 | 可以做的事 | 现在不做的原因 | 照现状发布的风险 |
 |:-----------|:---------------|:-----------------|
-| POST 的幂等键 | RAM 中只有四个槽位，一次重试只多占一个 | 重试的 POST 会创建第二个条目 |
 | 把条目保存在卡上 | 本示例演示 POST，持久化由 RestApi 演示 | 重启后条目消失 |
 | 用来读回的 GET 路由 | 每个动词示例只演示一个动词 | 客户端只能在 `201` 的请求体中看到条目 |
 
 ## 假设
 
-- 网络是可信的：没有认证，也没有 TLS。
+- 网络足够可信，可以传输明文密码和令牌：没有 TLS。
 - 一次一个客户端：`mado::Server` 每次 `loop` 只应答一个连接。
+
+## 登录与安全写入
+
+除 `POST /api/auth/login` 外，每个 `/api` 路由都需要持有者令牌。用 `{"username":"admin","password":"..."}` 登录，得到 15 分钟内且开发板重启前有效的令牌；缺少令牌、签名错误或令牌过时都会应答带 `WWW-Authenticate: Bearer` 的 `401`。
+
+同一客户端地址登录失败五次，该地址会以 `429` 和 `Retry-After` 锁定 15 分钟，其他地址仍可登录。表中保存四个地址，四个都被锁定时新地址也被锁定，所以轮换地址无法解除锁定。 每个地址的次数写入 `/LOGIN.TXT`，所以锁定在重启后依然有效。
+
+构建前用 `python3 -m tools.madogen secrets examples/RestPost --user admin` 把账户写入 [`arduino_secrets.h`](arduino_secrets.h)；提交的文件是全零的占位值，对每次登录都应答 `503`。
+
+`POST` 支持 `Idempotency-Key: "<1 到 64 个字符>"`。相同键和相同请求体的重试会应答 `201` 并返回第一次请求创建的条目；相同键但请求体不同则应答 `422`。开发板记住最近八个键，与条目一样保存在 RAM 中。
 
 ## 测试
 
@@ -145,7 +155,9 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 |:-----|------:|:---------|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名称规则、id 范围、生成条目 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、表已满、find |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 14 | `201` 和 `Location`、id 顺序、`507`、八种被拒绝的请求体、空名称 |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 20 | `201` 和 `Location`、id 顺序、`507`、八种被拒绝的请求体、空名称 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 计数器、登录、卡上按地址记录的失败次数、跨重启的锁定、令牌检查 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 凭据规则、会话计数器、令牌结束时间 |
 
 `cd "SD Card" && pnpm run test` 以 100% 覆盖率运行 7 个页面测试。
 
@@ -163,6 +175,7 @@ ctest --test-dir build -R '^RestPost\.' --output-on-failure
 ## 快速开始
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestPost --user admin && cd examples/RestPost
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -172,14 +185,15 @@ cd "SD Card" && pnpm install && pnpm run build
 把 `SD Card/dist` 复制到卡上，然后：
 
 ```bash
-curl -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -i -X POST -H 'Content-Type: application/json' -d '{"name":"lamp","on":true}' http://192.168.1.177/api/items
 ```
 
 ## 技术栈
 
 | 类别 | 技术 |
 |:-----|:-----|
-| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 77,032 字节，RAM 32,768 字节中用 5,904 字节 |
+| 开发板 | Arduino Uno R4 Minima：闪存 262,144 字节中用 90,816 字节，RAM 32,768 字节中用 6,928 字节 |
 | HTTP | Madoguchi，不用堆的 C++11 |
 | 卡 | SdFat 2.3.0 |
 | 网络 | Ethernet 2.0.2 |

@@ -15,8 +15,8 @@
 | アダプター | `mado::SlotTable`上の`RamItemRepository`。`ItemsController`は生成された有無のマスクを`ItemChange`に変えます。 |
 | コンポジションルート | [`RestPatch.ino`](RestPatch.ino)が「lamp」と「fan」を投入し、カードをマウントし、両方をルーターに渡します。 |
 | 契約 | [`openapi.json`](openapi.json)は必須フィールドのない`ItemPatch`を宣言し、[`api.generated.h`](src/http/api.generated.h)がそれを構造体とビットマスクに読み込みます。 |
-| テスト | 4ファイルのホストテスト30件と、カバレッジ100パーセントのページテスト15件。 |
-| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.10個のアサーション。 |
+| テスト | 6ファイルのホストテスト56件と、カバレッジ100パーセントのページテスト15件。 |
+| ルール | JPL D-60411とPower of Ten。ヒープなし、仮想関数なし、関数ポインターなし、関数あたり2.08個のアサーション。 |
 
 ## アーキテクチャ
 
@@ -56,6 +56,7 @@ RestPatch/
   openapi.json                             API契約
   src/http/api.generated.h                 生成
   src/http/api.router.h                    更新のルート、それ以外のパスはカードのページ
+  src/identity/...                         ログイン。RestAuthと同じコード
   src/items/domain/item.entity.h           Item、ItemChange、change_status、changed
   src/items/application/item_repository.port.h
   src/items/application/item_catalog.service.h   add、find、change
@@ -114,13 +115,22 @@ PATCHのボディには必須フィールドがないので、「送られてい
 | できること | 今はしない理由 | このままのリスク |
 |:-----------|:---------------|:-----------------|
 | `null`でフィールドを消すJSON Merge Patch | ここには消せるフィールドがない | `null`は`422`になる |
-| ETagを使った`If-Match` | クライアントは1つ、項目は4件 | 2つのクライアントが互いに上書きできる |
 | 項目をカードに保存する | 永続化はRestApiが示す | 起動のたびに項目は初期データに戻る |
 
 ## 前提
 
-- ネットワークは信頼できる。認証もTLSもない。
+- ネットワークは平文のパスワードとトークンを送れる程度に信頼できる。TLSはない。
 - 同時に扱うクライアントは1つ。
+
+## ログインと安全な書き込み
+
+`POST /api/auth/login`を除くすべての`/api`ルートにベアラートークンが必要です。`{"username":"admin","password":"..."}`でログインすると、15分間かつボードが再起動するまで有効なトークンが返ります。トークンがない、署名が違う、古い場合は`WWW-Authenticate: Bearer`付きの`401`を返します。
+
+1つのクライアントアドレスからログインに5回失敗すると、そのアドレスは`429`と`Retry-After`で15分間ロックされ、ほかのアドレスはログインを続けられます。表は4つのアドレスを持ち、4つすべてがロック中の間は新しいアドレスもロックされるので、アドレスを替えてもロックは解けません。 アドレスごとの回数は`/LOGIN.TXT`に書き込まれるので、ロックは再起動後も残ります。
+
+ビルドの前に`python3 -m tools.madogen secrets examples/RestPatch --user admin`でアカウントを[`arduino_secrets.h`](arduino_secrets.h)に書き込みます。コミットされているファイルはすべてゼロの仮の値で、ログインには必ず`503`を返します。
+
+項目を返す応答は、起動ごとの乱数、id、書き込みのたびに上がるリビジョンから作る強い`ETag`を送ります。それを`If-Match`で送り返すと、その後に誰かが項目を変えていた場合、書き込みは変更を上書きせずに`412 Precondition Failed`を返します。
 
 ## テスト
 
@@ -133,8 +143,10 @@ ctest --test-dir build -R '^RestPatch\.' --output-on-failure
 |:---------|---------:|:-----|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名前のルール、idの範囲、項目の生成 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、満杯のテーブル、find |
-| [`item_change.test.cpp`](tests/item_change.test.cpp) | 5 | 空の変更、空の名前、名前を保つ切り替え、保存される名前変更、空きid |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 10 | 1フィールド、名前変更、拒否されるボディ、壊れたJSON、空きid、`{}` |
+| [`item_change.test.cpp`](tests/item_change.test.cpp) | 7 | 空の変更、空の名前、名前を保つ切り替え、保存される名前変更、空きid |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 15 | 1フィールド、名前変更、拒否されるボディ、壊れたJSON、空きid、`{}` |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROMカウンター、ログイン、カード上のアドレスごとの失敗回数、再起動をまたぐロックアウト、トークンの確認 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 認証情報の規則、セッションカウンター、トークンの終了時刻 |
 
 `cd "SD Card" && pnpm run test`はカバレッジ100パーセントで15件のページテストを実行します。
 
@@ -152,6 +164,7 @@ ctest --test-dir build -R '^RestPatch\.' --output-on-failure
 ## はじめに
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestPatch --user admin && cd examples/RestPatch
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -161,14 +174,15 @@ cd "SD Card" && pnpm install && pnpm run build
 `SD Card/dist`をカードにコピーしてから：
 
 ```bash
-curl -X PATCH -H 'Content-Type: application/json' -d '{"on":false}' http://192.168.1.177/api/items/1
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" -X PATCH -H 'Content-Type: application/json' -d '{"on":false}' http://192.168.1.177/api/items/1
 ```
 
 ## 技術スタック
 
 | 分類 | 技術 |
 |:-----|:-----|
-| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中77,692バイト、RAM 32,768バイト中5,904バイト |
+| ボード | Arduino Uno R4 Minima：フラッシュ262,144バイト中91,656バイト、RAM 32,768バイト中6,332バイト |
 | HTTP | Madoguchi、ヒープを使わないC++11 |
 | カード | SdFat 2.3.0 |
 | ネットワーク | Ethernet 2.0.2 |

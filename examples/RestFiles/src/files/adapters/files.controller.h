@@ -9,6 +9,7 @@
 #include <mado/DecodeMode.h>
 #include <mado/FileReply.h>
 #include <mado/FileStamp.h>
+#include <mado/Precondition.h>
 #include <mado/Problem.h>
 #include <mado/Reply.h>
 #include <mado/check.h>
@@ -16,6 +17,7 @@
 #include <mado/file_etag.h>
 #include <mado/flash_address.h>
 #include <mado/http_status.h>
+#include <mado/if_match.h>
 #include <mado/parse_repr_digest.h>
 #include <mado/send_file.h>
 #include <mado/send_problem.h>
@@ -71,7 +73,7 @@ class FilesController {
         stamp.size,
         mado::content_type_for(&path.text[1]),
         false,
-        tagged ? &tag[0] : nullptr,
+        tagged ? strong_tag(tag) : nullptr,
         download ? &path.text[1] : nullptr,
         nullptr,
     };
@@ -91,6 +93,12 @@ class FilesController {
     }
     DigestClaim claim = {};
     claim.given = mado::parse_repr_digest(exchange.header(F("Repr-Digest")), claim.bytes);
+    if (!mado::check(claim.given)) {
+      return refuse(exchange, Refusal::kNoDigest);
+    }
+    if (!mado::check(unchanged(exchange, library, path))) {
+      return refuse(exchange, Refusal::kChanged);
+    }
     const StoreStatus status = library.store(path, exchange, claim);
     if (!mado::check((status == StoreStatus::kCreated) || (status == StoreStatus::kReplaced))) {
       return mado::send_problem(exchange, refusal(status));
@@ -117,7 +125,7 @@ class FilesController {
   }
 
  private:
-  enum class Refusal : uint8_t { kBadName, kMissing, kTooLarge };
+  enum class Refusal : uint8_t { kBadName, kMissing, kTooLarge, kNoDigest, kChanged };
 
   class ListWriter {
    public:
@@ -197,23 +205,55 @@ class FilesController {
     return reply.status(mado::http::kCreated).header(F("Location"), &location[0]).length(0U).end();
   }
 
+  static const char* strong_tag(const char (&tag)[mado::kFileEtagSize]) {
+    const bool weak = mado::check(tag[0] == 'W') && mado::check(tag[1] == '/');
+    return weak ? &tag[2] : &tag[0];
+  }
+
+  static bool unchanged(ExchangeT& exchange, LibraryT& library, const FilePath& path) {
+    const char* const header = exchange.header(F("If-Match"));
+    if (header == nullptr) {
+      return true;
+    }
+    FileT file;
+    mado::FileStamp stamp = {};
+    const bool opened = mado::check(library.open(path, file, stamp) == OpenStatus::kOpened);
+    file.close();
+    char tag[mado::kFileEtagSize] = {};
+    const bool tagged = opened && mado::check(mado::file_etag(&path.text[0], stamp, tag));
+    return mado::if_match(header, tagged ? strong_tag(tag) : nullptr) == mado::Precondition::kHolds;
+  }
+
   static bool refuse(ExchangeT& exchange, const Refusal reason) {
     const bool fresh = mado::check(!exchange.status_sent());
-    if (mado::check(reason == Refusal::kBadName)) {
-      return fresh &&
-             mado::send_problem(exchange, mado::Problem{
-                                              mado::http::kBadRequest,
-                                              F("file names are 1 to 64 printable ASCII "
-                                                "characters without \\ / : * ? \" < > | %"),
-                                          });
+    return fresh && mado::send_problem(exchange, problem_for(reason));
+  }
+
+  static mado::Problem problem_for(const Refusal reason) {
+    const bool known =
+        mado::check(static_cast<uint8_t>(reason) <= static_cast<uint8_t>(Refusal::kChanged));
+    if (!(known && mado::check(reason != Refusal::kTooLarge))) {
+      return mado::Problem{mado::http::kInternalServerError, F("the file is larger than 4 GiB")};
     }
-    return fresh && mado::send_problem(exchange, (reason == Refusal::kMissing)
-                                                     ? mado::Problem{mado::http::kNotFound,
-                                                                     F("no file has this name"),}
-                                                     : mado::Problem{
-                                                           mado::http::kInternalServerError,
-                                                           F("the file is larger than 4 GiB"),
-                                                       });
+    switch (reason) {
+      case Refusal::kBadName:
+        return mado::Problem{
+            mado::http::kBadRequest,
+            F("file names are 1 to 64 printable ASCII characters without \\ / : * ? \" < > | %"),
+        };
+      case Refusal::kMissing:
+        return mado::Problem{mado::http::kNotFound, F("no file has this name")};
+      case Refusal::kNoDigest:
+        return mado::Problem{
+            mado::http::kBadRequest,
+            F("a Repr-Digest with a sha-256 digest is required"),
+        };
+      default:
+        return mado::Problem{
+            mado::http::kPreconditionFailed,
+            F("the file changed since the ETag in If-Match"),
+        };
+    }
   }
 };
 

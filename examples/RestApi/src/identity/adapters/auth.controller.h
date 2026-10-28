@@ -31,9 +31,10 @@ template <typename ExchangeT, typename AccessT, typename JournalT>
 class AuthController {
  public:
   static bool login(ExchangeT& exchange, AccessT& access, JournalT& journal, const uint32_t now) {
-    const Admission admission = access.admit(now);
+    const uint32_t address = exchange.client_address();
+    const Admission admission = access.admit(address, now);
     if (!mado::check(admission == Admission::kOpen)) {
-      return turn_away(exchange, access, admission, now);
+      return turn_away(exchange, access, admission, address, now);
     }
     rest_api::Credentials body = {};
     uint8_t present = 0U;
@@ -43,7 +44,7 @@ class AuthController {
       return mado::send_problem(exchange, problem);
     }
     char token[kTokenTextSize] = {};
-    const SignInStatus status = access.sign_in(credentials_of(body), now, token);
+    const SignInStatus status = access.sign_in(credentials_of(body), address, now, token);
     record(journal, status);
     if (!mado::check(status == SignInStatus::kSignedIn)) {
       return (status == SignInStatus::kRefused)
@@ -69,7 +70,7 @@ class AuthController {
   static_assert(sizeof(rest_api::Token::access_token) == kTokenTextSize, "the schema agrees");
 
   static bool turn_away(ExchangeT& exchange, const AccessT& access, const Admission admission,
-                        const uint32_t now) {
+                        const uint32_t address, const uint32_t now) {
     const bool refused = mado::check(admission != Admission::kOpen);
     if (refused && mado::check(admission == Admission::kUnprovisioned)) {
       return mado::send_problem(exchange, mado::Problem{
@@ -79,7 +80,7 @@ class AuthController {
     }
     mado::Reply<ExchangeT> reply(exchange);
     return reply.status(mado::http::kTooManyRequests)
-        .header(F("Retry-After"), access.retry_after(now))
+        .header(F("Retry-After"), access.retry_after(address, now))
         .length(0U)
         .end();
   }

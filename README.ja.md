@@ -25,7 +25,7 @@
 
 ---
 
-Madoguchiは、W5x00またはENC28J60のシールドとSDカードを載せたUno R4 Minimaで動作し、ヒープを一切確保しません。C++のコードにはHTML、CSS、スクリプト、画像を一切含めません。すべてのページはカード上にあり、サンプルごとに独立したWebプロジェクトから作られます。TypeScriptとクラス不要のPico CSSで書かれ、Viteがカードのファイルとgzipのコピーにビルドします。ボードは1つのOpenAPIドキュメントから生成したREST APIに応答し、JWTによるログイン、JSONボディ、すべてのHTTPメソッドを扱います。CIは、プッシュとプルリクエストのたびに9個のサンプルすべてをビルドしてボードのフラッシュまたはRAMの上限を超えたビルドを失敗させ、ホストテスト1,336件、ツールテスト91件、ページテスト127件、ブラウザーテスト32件を実行し、すべてのカードをビルドし、パーサーをファズテストします。
+Madoguchiは、W5x00またはENC28J60のシールドとSDカードを載せたUno R4 Minimaで動作し、ヒープを一切確保しません。C++のコードにはHTML、CSS、スクリプト、画像を一切含めません。すべてのページはカード上にあり、サンプルごとに独立したWebプロジェクトから作られます。TypeScriptとクラス不要のPico CSSで書かれ、Viteがカードのファイルとgzipのコピーにビルドします。ボードは1つのOpenAPIドキュメントから生成したREST APIに応答し、JWTによるログイン、JSONボディ、すべてのHTTPメソッドを扱います。CIは、プッシュとプルリクエストのたびに9個のサンプルすべてをビルドしてボードのフラッシュまたはRAMの上限を超えたビルドを失敗させ、ホストテスト1,546件、ツールテスト91件、ページテスト135件、ブラウザーテスト32件を実行し、すべてのカードをビルドし、パーサーをファズテストします。
 
 名前の由来は、依頼を受け取って答えを返す「窓口」です。
 
@@ -157,15 +157,15 @@ Madoguchiが対応するボードは、Renesas RA4M1を載せたArduino Uno R4 M
 
 | サンプル | 内容 | フラッシュ（262,144中） | 使用RAM（32,768中） |
 |:--------|:------|------:|------:|
-| [`RestGet`](examples/RestGet/RestGet.ino) | 項目一覧と項目1件の`GET` | 74,764 | 5,904 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | JSONによる新しい項目の`POST` | 77,032 | 5,904 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | 項目を置き換える`PUT` | 77,656 | 5,904 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 項目の一部のフィールドを変更する`PATCH` | 77,692 | 5,904 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | IDによる項目の`DELETE` | 73,856 | 5,904 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | ログインと保護されたルート1つ | 87,496 | 6,184 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD上のファイル。一覧、ダウンロード、範囲指定、進捗付きアップロード、削除 | 94,472 | 6,944 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | 完全なAPI、そのサイト、Swagger UI、リクエストログ | 107,364 | 6,648 |
-| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 0x00と0xFFで消去して検証し、FAT16、FAT32、exFATでフォーマット。JSONのみ | 71,852 | 9,936 |
+| [`RestGet`](examples/RestGet/RestGet.ino) | 項目一覧と項目1件の`GET` | 89,612 | 6,312 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | JSONによる新しい項目の`POST` | 90,816 | 6,928 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | 項目を置き換える`PUT` | 91,652 | 6,332 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 項目の一部のフィールドを変更する`PATCH` | 91,656 | 6,332 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | IDによる項目の`DELETE` | 89,076 | 6,312 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | ログインと保護されたルート1つ | 88,324 | 6,224 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD上のファイル。一覧、ダウンロード、範囲指定、進捗付きアップロード、削除 | 104,108 | 7,048 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | 完全なAPI、そのサイト、Swagger UI、リクエストログ | 110,600 | 7,328 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 0x00と0xFFで消去して検証し、FAT16、FAT32、exFATでフォーマット。JSONのみ | 92,456 | 10,344 |
 
 RestFormat以外のどのサンプルも`/api/openapi.json`にカードから応答し、`/docs/`でSwagger UIを配信します。CIは、ボードの上限を超えたビルドを失敗させます。
 
@@ -337,7 +337,7 @@ const bool spec = mado::serve_card_path<FILE_READ>(exchange, sd_card, &kSpecPath
 
 `serve_card_file()`はリクエストのパスをカード上で解決し、外へ出ようとするパスには`400`、存在しないファイルやフォルダーには`404`を返し、ブラウザーがgzipを受け付けるときはファイルの隣の`.gz`のコピーを送ります。`9f86d081.js`のように16進8桁と拡張子からなる名前は`public, max-age=31536000, immutable`でキャッシュさせ、それ以外のファイルには`no-cache`を付けます。`serve_card_path()`は1つの決まったファイルを配信し、`/api/openapi.json`はこれで`/openapi.json`を返します。
 
-ダウンロード、範囲指定、条件付きリクエストには、サイズ、タイプ、gzipフラグ、ETag、ダウンロード名、`Cache-Control`の値を入れた`mado::FileReply`を`mado::send_file()`に渡します。`mado::file_etag()`は、名前、サイズ、スケッチが書き込みのたびと起動時に変えるバージョンから弱いETagを作ります。そのため、同じサイズのファイルで置き換えても新しいタグになります。`If-Range`付きの`Range`にはファイル全体を返します。弱いタグでは、部分同士が同じ版であることを証明できないためです。[`RestFiles`](examples/RestFiles/RestFiles.ino)はこれらをすべて使います。
+ダウンロード、範囲指定、条件付きリクエストには、サイズ、タイプ、gzipフラグ、ETag、ダウンロード名、`Cache-Control`の値を入れた`mado::FileReply`を`mado::send_file()`に渡します。`mado::file_etag()`は、名前、サイズ、スケッチが書き込みのたびと起動時に変えるバージョンから弱いETagを作ります。そのため、同じサイズのファイルで置き換えても新しいタグになります。弱いタグでは`If-Range`付きの`Range`にファイル全体を返します。部分同士が同じ版であることを証明できないためです。[`RestFiles`](examples/RestFiles/RestFiles.ino)は同じタグの強い形を送ります。バージョンは書き込み、削除、再マウントのたびに変わるのでそれが成り立ち、範囲の再開ができます。`PUT`がファイルを置き換える前には`mado::if_match()`がその強いタグを比べます。
 
 ### Basic認証
 
@@ -492,11 +492,11 @@ curl -s -H "Authorization: Bearer $TOKEN" http://madoguchi.local/api/log | jq -c
 | `POST /api/items`、`PUT`、`PATCH`、`DELETE /api/items/{id}` | 変更、Bearerトークンが必要 |
 | `GET /api/log`、`DELETE /api/log` | JSON行のリクエストログ、末尾を読むための`Range`、ログの消去。Bearerトークンが必要 |
 
-[`RestAuth`](examples/RestAuth/RestAuth.ino)は、ログインと保護されたルート1つを示します。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino)、[`RestDelete`](examples/RestDelete/RestDelete.ino)は、それぞれ認証なしで1つのメソッドを示します。[`RestFiles`](examples/RestFiles/RestFiles.ino)は、SDカード上のファイルの一覧、ダウンロード、進捗バー付きのアップロード、削除を行います。認証がないため、信頼できるネットワークで使ってください。どれもアプリケーションコードをスケッチの隣のヘッダーに置いているため、ホストテストはボードが実行するのと同じコードを実行します。カードがないときは、problemドキュメント付きの`503`を返します。
+[`RestAuth`](examples/RestAuth/RestAuth.ino)は、ログインと保護されたルート1つを示します。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino)、[`RestDelete`](examples/RestDelete/RestDelete.ino)は、それぞれ同じログインの後ろで1つのメソッドを示し、`POST /api/auth/login`を除くすべての`/api`ルートにベアラートークンが必要です。[`RestFiles`](examples/RestFiles/RestFiles.ino)は、SDカード上のファイルの一覧、ダウンロード、進捗バー付きのアップロード、削除を行います。一覧とダウンロードは公開で、アップロードと削除にはトークンが必要です。どのサンプルもアプリケーションコードを`src/`の下に層に分けて置くので、ホストテストはボードと同じコードを動かし、カードがないときは問題ドキュメント付きの`503`を返します。どのログインも、失敗が5回続いたクライアントアドレスだけを締め出し、ほかのアドレスは使えるままです。
 
 ### カードの消去とフォーマット
 
-[`RestFormat`](examples/RestFormat/RestFormat.ino)は、ほかのすべてのサンプル用にカードを準備します。応答はJSONだけで、ページもログインもないため、信頼できるネットワークで使ってください。カード上のものはすべて消えます。
+[`RestFormat`](examples/RestFormat/RestFormat.ino)は、ほかのすべてのサンプル用にカードを準備します。応答はJSONだけでページはなく、すべてのルートに`POST /api/auth/login`のベアラートークンが必要です。カード上のものはすべて消えます。
 
 | ルート | 動作 |
 |:------|:-----|
@@ -578,10 +578,10 @@ python3 -m tools.madogen secrets examples/RestApi --user admin
 
 | スイート | コマンド | 対象 |
 |:------|:--------|:-------|
-| ライブラリとサンプル | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,336件。RFC 9112適合表、解析、ルーティング、レスポンス、カードのファイル、範囲指定、ネットワーク補助関数、SDログ、暗号、トークン、サンプルのアプリケーションコード、各ファズコーパスの再生 |
+| ライブラリとサンプル | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,546件。RFC 9112適合表、解析、ルーティング、レスポンス、カードのファイル、範囲指定、ネットワーク補助関数、SDログ、暗号、トークン、サンプルのアプリケーションコード、各ファズコーパスの再生 |
 | カバレッジ | `gcovr build --root . --filter src/ --merge-lines --txt` | `src/`の行と関数のカバレッジ。CIでは95パーセントを下限とします |
 | ジェネレーターとゲート | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen`、アサーション密度ゲート、サイズゲート、スループットツールの91件 |
-| ページ | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | 依存関係の監査、Biome、TypeScript、html-validate、カバレッジ95パーセントのゲート付きVitestテスト127件、すべてのカードのビルド |
+| ページ | `pnpm audit --audit-level=low && pnpm run check && pnpm run test && pnpm run build` | 依存関係の監査、Biome、TypeScript、html-validate、カバレッジ95パーセントのゲート付きVitestテスト135件、すべてのカードのビルド |
 | ブラウザー | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | Playwrightテスト32件。すべてのページとドキュメントページを320 pxとデスクトップ幅で検証 |
 | スループット | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | ボードに対するダウンロードとアップロードの速度をJSONで表示 |
 | 生成コード | `python3 -m tools.madogen check examples/Rest*` | `src/http/api.generated.h`がソースと一致し、本物の鍵がコミットされていないこと |

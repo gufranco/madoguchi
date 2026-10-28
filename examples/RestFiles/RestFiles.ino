@@ -9,17 +9,26 @@
 #include <mado/MdnsResponder.h>
 #include <mado/NetworkAction.h>
 #include <mado/NetworkWatch.h>
+#include <mado/UptimeClock.h>
 #include <mado/begin_network.h>
 #include <mado/load_mac.h>
 
+#include "arduino_secrets.h"
 #include "src/files/application/file_library.service.h"
 #include "src/http/api.generated.h"
 #include "src/http/api.router.h"
+#include "src/identity/adapters/card_failure.store.h"
+#include "src/identity/adapters/eeprom_session.counter.h"
+#include "src/identity/adapters/flash_secrets.authority.h"
+#include "src/identity/application/access.service.h"
 
 #include <SdFat.h>
 
 using Library = files::FileLibrary<SdFs, FsFile, FILE_READ, FILE_WRITE>;
-using WebApp = api::Router<EthernetClient, Library, SdFs, FsFile, FILE_READ>;
+using Authority = identity::FlashSecretsAuthority<secrets::Provisioned>;
+using Failures = identity::CardFailureLog<SdFs, FILE_READ, FILE_WRITE>;
+using Access = identity::AccessService<Authority, Failures>;
+using WebApp = api::Router<EthernetClient, Access, Library, SdFs, FsFile, FILE_READ>;
 
 constexpr uint8_t kSdChipSelect = 4U;
 
@@ -68,10 +77,18 @@ void watch_network() {
   static_cast<void>(renewed);
 }
 
+Authority authority;
+mado::UptimeClock uptime;
+identity::EepromSessionCounter<decltype(EEPROM)> sessions(EEPROM);
+
 void setup() {
   static Library library;
   const bool mounted = library.begin(kSdChipSelect, sd_card, entropy());
   static_cast<void>(mounted);
+  static Failures failures(library.mounted());
+  static Access access(authority, failures);
+  access.begin(sessions.advance());
+  WebApp::attach_access(access, uptime);
   WebApp::attach(library);
   const bool known = mado::load_mac(EEPROM, kMacAddress, mac_address, entropy());
   static_cast<void>(known);

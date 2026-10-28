@@ -15,8 +15,8 @@
 | 契約 | [`openapi.json`](openapi.json) 是 [`api.generated.h`](src/http/api.generated.h) 中路由、線上結構及 JSON 寫入函式的來源。 |
 | 錯誤 | 未知的 id 以 RFC 9457 問題詳情回應 `404`。沒有記憶卡時回應 `503`。 |
 | 頁面 | `SD Card` 是一個 Vite 及 TypeScript 項目，採用相同的劃分：`domain`、附端口的 `application`、`adapters/http` 及 `adapters/dom`。 |
-| 測試 | 三個檔案中的 26 個主機測試，以及覆蓋率 100% 的 9 個頁面測試。 |
-| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個迴圈都有上限，每個函式平均 2.06 個斷言。 |
+| 測試 | 五個檔案中的 47 個主機測試，以及覆蓋率 100% 的 9 個頁面測試。 |
+| 規則 | JPL D-60411 及 Power of Ten：不用堆積、不用虛擬函式、不用函式指標，每個迴圈都有上限，每個函式平均 2.02 個斷言。 |
 
 ## 架構
 
@@ -61,6 +61,7 @@ RestGet/
     http/
       api.generated.h                      路由、上限、線上結構及 JSON 寫入，由工具產生
       api.router.h                         路由 id 到控制器，其餘路徑交給記憶卡上的頁面
+    identity/                              登入，與 RestAuth 相同的程式碼
     items/
       domain/item.entity.h                 Item、ItemDraft、id 範圍及名稱規則
       application/item_repository.port.h   儲存庫必須提供的呼叫
@@ -75,7 +76,7 @@ RestGet/
 
 ## API 端點
 
-所有路由都不需要認證。
+除登入外，每個 `/api` 路由都需要持有人權杖，見「登入及安全寫入」一節。
 
 | 方法 | 端點 | 說明 |
 |:-----|:-----|:-----|
@@ -131,9 +132,17 @@ RestGet/
 
 ## 假設
 
-- 網絡是可信的：沒有認證，亦沒有 TLS。
+- 網絡足夠可信，可以傳送明文密碼及權杖：沒有 TLS。
 - 一次一個客戶端：`mado::Server` 每次 `loop` 只回應一個連線。
 - SD 卡裏放的是 `pnpm run build` 寫到 `SD Card/dist` 的檔案。
+
+## 登入及安全寫入
+
+除 `POST /api/auth/login` 外，每個 `/api` 路由都需要持有人權杖。以 `{"username":"admin","password":"..."}` 登入，取得 15 分鐘內及開發板重啟前有效的權杖；缺少權杖、簽署錯誤或權杖過時都會回應附 `WWW-Authenticate: Bearer` 的 `401`。
+
+同一客戶端位址登入失敗五次，該位址會以 `429` 及 `Retry-After` 鎖定 15 分鐘，其他位址仍可登入。表中保存四個位址，四個都被鎖定時新位址亦被鎖定，所以輪換位址無法解除鎖定。 每個位址的次數寫入 `/LOGIN.TXT`，所以鎖定在重啟後依然有效。
+
+建置前以 `python3 -m tools.madogen secrets examples/RestGet --user admin` 把帳戶寫入 [`arduino_secrets.h`](arduino_secrets.h)；提交的檔案是全零的佔位值，對每次登入都回應 `503`。
 
 ## 測試
 
@@ -148,7 +157,9 @@ ctest --test-dir build -R '^RestGet\.' --output-on-failure
 |:-----|------:|:---------|
 | [`item.entity.test.cpp`](tests/item.entity.test.cpp) | 9 | 名稱規則、id 範圍、由草稿產生項目 |
 | [`item_catalog.service.test.cpp`](tests/item_catalog.service.test.cpp) | 6 | add、表已滿、範圍內外的 find |
-| [`items.api.test.cpp`](tests/items.api.test.cpp) | 11 | 列表、讀取、HEAD、三種不存在的 id、405、規格文件、頁面、沒有記憶卡 |
+| [`items.api.test.cpp`](tests/items.api.test.cpp) | 13 | 列表、讀取、HEAD、三種不存在的 id、405、規格文件、頁面、沒有記憶卡 |
+| [`identity.adapters.test.cpp`](tests/identity.adapters.test.cpp) | 9 | EEPROM 計數器、登入、記憶卡上按位址記錄的失敗次數、跨重啟的鎖定、權杖檢查 |
+| [`identity.domain.test.cpp`](tests/identity.domain.test.cpp) | 10 | 憑證規則、工作階段計數器、權杖結束時間 |
 
 頁面測試在 Vitest 及 happy-dom 中執行：`cd "SD Card" && pnpm run test` 執行 9 個測試，陳述式、分支、函式及行的覆蓋率都是 100%。
 
@@ -166,6 +177,7 @@ ctest --test-dir build -R '^RestGet\.' --output-on-failure
 ## 開始使用
 
 ```bash
+cd ../.. && python3 -m tools.madogen secrets examples/RestGet --user admin && cd examples/RestGet
 arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 arduino-cli compile --fqbn arduino:renesas_uno:minima --library ../.. .
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port /dev/cu.usbmodem1101 .
@@ -175,7 +187,8 @@ cd "SD Card" && pnpm install && pnpm run build
 把 `SD Card/dist` 的內容複製到一張 FAT32 或 exFAT 記憶卡的根目錄，插入擴充板，然後打開 `http://192.168.1.177/`。
 
 ```bash
-curl http://192.168.1.177/api/items/1
+TOKEN=$(curl -s -H 'Content-Type: application/json' -d '{"username":"admin","password":"your password"}' http://192.168.1.177/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.177/api/items/1
 ```
 
 ```json
@@ -186,7 +199,7 @@ curl http://192.168.1.177/api/items/1
 
 | 類別 | 技術 |
 |:-----|:-----|
-| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 74,764 位元組，RAM 32,768 位元組中用 5,904 位元組 |
+| 開發板 | Arduino Uno R4 Minima：快閃記憶體 262,144 位元組中用 89,612 位元組，RAM 32,768 位元組中用 6,312 位元組 |
 | HTTP | Madoguchi，不用堆積的 C++11 |
 | 記憶卡 | SdFat 2.3.0 |
 | 網絡 | Ethernet 2.0.2 |
