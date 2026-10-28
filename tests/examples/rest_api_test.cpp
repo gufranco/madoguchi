@@ -102,8 +102,10 @@ class RestApiTest : public ::testing::Test {
   FakeData data_{20261026U};
 };
 
-TEST_F(RestApiTest, ServesTheHomePageGzipped) {
+TEST_F(RestApiTest, ServesTheHomePageFromTheCardGzipped) {
   // Arrange
+  store().files()["/index.html"] = "<!doctype html><title>x</title>";
+  store().files()["/index.html.gz"] = "\x1F\x8Bzz";
   const Request request{"GET / HTTP/1.1", "Accept-Encoding: gzip\r\n", ""};
 
   // Act
@@ -112,25 +114,43 @@ TEST_F(RestApiTest, ServesTheHomePageGzipped) {
   // Assert
   EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
   EXPECT_NE(response.find("Content-Type: text/html; charset=utf-8\r\n"), std::string::npos);
-  EXPECT_NE(response.find("Content-Encoding: gzip\r\n"), std::string::npos);
-  EXPECT_NE(response.find("Content-Security-Policy: default-src 'none';"), std::string::npos);
-  EXPECT_EQ(body_of(response).substr(0U, 2U), "\x1F\x8B");
+  EXPECT_NE(response.find("Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n"),
+            std::string::npos);
+  EXPECT_NE(response.find("Cache-Control: no-cache\r\n"), std::string::npos);
+  EXPECT_EQ(body_of(response), "\x1F\x8Bzz");
 }
 
-TEST_F(RestApiTest, ServesTheDocsPageAtBothSpellings) {
+TEST_F(RestApiTest, ServesThePlainPageToClientsWithoutGzip) {
   // Arrange
-  const Request request{"GET /docs/ HTTP/1.1", "Accept-Encoding: gzip\r\n", ""};
+  store().files()["/index.html"] = "<!doctype html><title>x</title>";
+  store().files()["/index.html.gz"] = "\x1F\x8Bzz";
+  const Request request{"GET / HTTP/1.1", "", ""};
 
   // Act
   const std::string response = send(request);
 
   // Assert
   EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
-  EXPECT_NE(response.find("script-src 'self' https://unpkg.com;"), std::string::npos);
+  EXPECT_EQ(response.find("Content-Encoding"), std::string::npos);
+  EXPECT_EQ(body_of(response), "<!doctype html><title>x</title>");
 }
 
-TEST_F(RestApiTest, ServesTheSpecAsJson) {
+TEST_F(RestApiTest, ServesTheDocsPageFromItsFolder) {
   // Arrange
+  store().files()["/docs/index.html"] = "<!doctype html><title>docs</title>";
+  const Request request{"GET /docs/ HTTP/1.1", "", ""};
+
+  // Act
+  const std::string response = send(request);
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
+  EXPECT_EQ(body_of(response), "<!doctype html><title>docs</title>");
+}
+
+TEST_F(RestApiTest, ServesTheSpecFromTheCard) {
+  // Arrange
+  store().files()["/openapi.json"] = R"({"openapi":"3.1.0"})";
   const Request request{"GET /api/openapi.json HTTP/1.1", "Accept-Encoding: gzip\r\n", ""};
 
   // Act
@@ -139,35 +159,22 @@ TEST_F(RestApiTest, ServesTheSpecAsJson) {
   // Assert
   EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
   EXPECT_NE(response.find("Content-Type: application/json\r\n"), std::string::npos);
+  EXPECT_EQ(body_of(response), R"({"openapi":"3.1.0"})");
 }
 
-TEST_F(RestApiTest, RevalidatesAStaticFile) {
+TEST_F(RestApiTest, CachesHashedFilesForAYear) {
   // Arrange
-  const std::string first = send({"GET / HTTP/1.1", "Accept-Encoding: gzip\r\n", ""});
-  const size_t start = first.find("ETag: ") + 6U;
-  const std::string tag = first.substr(start, first.find("\r\n", start) - start);
-
-  // Act
-  const std::string response =
-      send({"GET / HTTP/1.1", "Accept-Encoding: gzip\r\nIf-None-Match: " + tag + "\r\n", ""});
-
-  // Assert
-  EXPECT_EQ(status_line(response), "HTTP/1.1 304 Not Modified");
-  EXPECT_NE(response.find("Cache-Control: max-age=300, must-revalidate\r\n"), std::string::npos);
-  EXPECT_EQ(body_of(response), "");
-  EXPECT_EQ(status_line(send({"GET /app.js HTTP/1.1", "Accept-Encoding: gzip\r\n", ""})),
-            "HTTP/1.1 404 Not Found");
-}
-
-TEST_F(RestApiTest, RefusesClientsWithoutGzip) {
-  // Arrange
-  const Request request{"GET / HTTP/1.1", "", ""};
+  store().files()["/0123abcd.js"] = "export{};";
+  const Request request{"GET /0123abcd.js HTTP/1.1", "", ""};
 
   // Act
   const std::string response = send(request);
 
   // Assert
-  EXPECT_EQ(status_line(response), "HTTP/1.1 406 Not Acceptable");
+  EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
+  EXPECT_NE(response.find("Content-Type: text/javascript\r\n"), std::string::npos);
+  EXPECT_NE(response.find("Cache-Control: public, max-age=31536000, immutable\r\n"),
+            std::string::npos);
 }
 
 TEST_F(RestApiTest, AnswersNotFoundForAnUnknownFile) {

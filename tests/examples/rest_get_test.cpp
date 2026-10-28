@@ -8,10 +8,13 @@
 #include "../../examples/RestGet/generated_api.h"
 #include "FakeClient.h"
 #include "FakeClock.h"
+#include "FakeSd.h"
 
 namespace {
 
-using App = GetApp<FakeClient>;
+constexpr const char* kSpecText = R"({"openapi":"3.1.0"})";
+
+using App = GetApp<FakeClient, FakeSd, FILE_READ>;
 using AppServer = mado::Server<FakeClient, App, rest_get::Limits>;
 
 std::string body_of(const std::string& response) {
@@ -34,10 +37,12 @@ class RestGetTest : public ::testing::Test {
  protected:
   void SetUp() override {
     fake_clock::set(0U);
-    App::begin();
+    card_.files()["/openapi.json"] = kSpecText;
+    App::begin(card_, 4U);
   }
 
  private:
+  FakeSd card_;
   AppServer server_{&rest_get::kRoutes[0], &rest_get::kHeaderNames[0]};
 };
 
@@ -118,7 +123,20 @@ TEST_F(RestGetTest, ServesItsOwnSpec) {
 
   // Assert
   EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
-  EXPECT_NE(response.find("Content-Encoding: gzip\r\n"), std::string::npos);
+  EXPECT_NE(response.find("Content-Type: application/json\r\n"), std::string::npos);
+  EXPECT_NE(response.find("Cache-Control: no-cache\r\n"), std::string::npos);
+  EXPECT_EQ(body_of(response), kSpecText);
+}
+
+TEST_F(RestGetTest, ServesPagesFromTheCard) {
+  // Arrange
+  const std::string line = "GET / HTTP/1.1";
+
+  // Act
+  const std::string response = send(line);
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 404 Not Found");
 }
 
 }

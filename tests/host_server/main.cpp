@@ -9,6 +9,10 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 
 #include "../../examples/RestApi/RestApp.h"
 #include "../../examples/RestApi/generated_api.h"
@@ -42,6 +46,19 @@ int listen_on(const uint16_t port) {
   return listening ? listener : -1;
 }
 
+void load_card(FakeSd& card, const char* const folder) {
+  const std::filesystem::path root(folder);
+  for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+    if (!entry.is_regular_file()) {
+      continue;
+    }
+    std::ifstream input(entry.path(), std::ios::binary);
+    const std::string content((std::istreambuf_iterator<char>(input)),
+                              std::istreambuf_iterator<char>());
+    card.files()["/" + std::filesystem::relative(entry.path(), root).generic_string()] = content;
+  }
+}
+
 }
 
 uint32_t millis() {
@@ -60,6 +77,9 @@ int main(int argc, char** argv) {
     return 1;
   }
   static FakeSd card;
+  if (argc > 3) {
+    load_card(card, argv[3]);
+  }
   HostApp::begin(7U, card, 4U);
   HostServer server(&rest_api::kRoutes[0], &rest_api::kHeaderNames[0]);
   std::printf("listening on http://127.0.0.1:%u\n", port);

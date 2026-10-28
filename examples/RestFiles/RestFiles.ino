@@ -5,7 +5,6 @@
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 #include <Madoguchi.h>
-#include <SD.h>
 #include <SPI.h>
 #include <mado/MdnsResponder.h>
 #include <mado/NetworkAction.h>
@@ -16,9 +15,14 @@
 #include "FilesApp.h"
 #include "generated_api.h"
 
-using WebApp = FilesApp<EthernetClient, SDClass, File, FILE_READ, FILE_WRITE>;
+#include <SdFat.h>
+
+using WebApp = FilesApp<EthernetClient, SdFs, FsFile, FILE_READ, FILE_WRITE>;
 
 constexpr uint8_t kSdChipSelect = 4U;
+
+SdFs sd_card;
+
 constexpr uint16_t kMacAddress = 8U;
 constexpr uint32_t kDhcpTimeoutMs = 10000UL;
 constexpr uint8_t kEntropyPins = 6U;
@@ -63,7 +67,7 @@ void watch_network() {
 }
 
 void setup() {
-  WebApp::begin(SD, kSdChipSelect, entropy());
+  WebApp::begin(sd_card, kSdChipSelect, entropy());
   const bool known = mado::load_mac(EEPROM, kMacAddress, mac_address, entropy());
   static_cast<void>(known);
   start_network();

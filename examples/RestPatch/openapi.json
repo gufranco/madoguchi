@@ -15,10 +15,7 @@
       "Item": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "on"
-        ],
+        "required": ["name", "on"],
         "properties": {
           "id": {
             "type": "integer",
@@ -52,10 +49,7 @@
       "Problem": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "title",
-          "status"
-        ],
+        "required": ["title", "status"],
         "properties": {
           "title": {
             "type": "string",

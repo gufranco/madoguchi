@@ -72,12 +72,37 @@
       }
     },
     "responses": {
-      "BadRequest": { "description": "Malformed JSON or missing body", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "BadRequest": {
+        "description": "Malformed JSON or missing body",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      },
       "Unauthorized": { "description": "Missing, invalid or expired token" },
-      "NotFound": { "description": "No item with this id", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
-      "Unsupported": { "description": "Content-Type is not application/json", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
-      "TooLarge": { "description": "The body is larger than this operation accepts", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
-      "Invalid": { "description": "A field is missing, unknown, too long or out of range", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+      "NotFound": {
+        "description": "No item with this id",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      },
+      "Unsupported": {
+        "description": "Content-Type is not application/json",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      },
+      "TooLarge": {
+        "description": "The body is larger than this operation accepts",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      },
+      "Invalid": {
+        "description": "A field is missing, unknown, too long or out of range",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      }
     }
   },
   "paths": {
@@ -87,12 +112,16 @@
         "summary": "Exchange credentials for a bearer token",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Credentials" } } }
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Credentials" } }
+          }
         },
         "responses": {
           "200": {
             "description": "Token issued",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Token" } } }
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Token" } }
+            }
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "413": { "$ref": "#/components/responses/TooLarge" },
@@ -100,7 +129,12 @@
           "415": { "$ref": "#/components/responses/Unsupported" },
           "422": { "$ref": "#/components/responses/Invalid" },
           "429": { "description": "Five failures in a row lock login for 15 minutes" },
-          "503": { "description": "The board has no signing key yet", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+          "503": {
+            "description": "The board has no signing key yet",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
         }
       }
     },
@@ -112,7 +146,9 @@
           "200": {
             "description": "All items",
             "content": {
-              "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } }
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } }
+              }
             }
           }
         }
@@ -135,7 +171,12 @@
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "415": { "$ref": "#/components/responses/Unsupported" },
           "422": { "$ref": "#/components/responses/Invalid" },
-          "507": { "description": "Every slot is taken", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+          "507": {
+            "description": "Every slot is taken",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
         }
       }
     },
@@ -179,7 +220,9 @@
         "security": [{ "bearerAuth": [] }],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemPatch" } } }
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ItemPatch" } }
+          }
         },
         "responses": {
           "200": {
@@ -216,10 +259,18 @@
         ],
         "responses": {
           "200": { "description": "The whole log", "content": { "application/x-ndjson": {} } },
-          "206": { "description": "One byte range of the log", "content": { "application/x-ndjson": {} } },
+          "206": {
+            "description": "One byte range of the log",
+            "content": { "application/x-ndjson": {} }
+          },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "416": { "description": "The range starts past the end of the log" },
-          "503": { "description": "The SD card is missing or holds no log yet", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+          "503": {
+            "description": "The SD card is missing or holds no log yet",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
         }
       },
       "delete": {
@@ -229,7 +280,12 @@
         "responses": {
           "204": { "description": "Deleted" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "503": { "description": "The SD card is missing", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+          "503": {
+            "description": "The SD card is missing",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
         }
       }
     }

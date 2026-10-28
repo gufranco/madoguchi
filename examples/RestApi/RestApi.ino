@@ -5,7 +5,6 @@
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 #include <Madoguchi.h>
-#include <SD.h>
 #include <SPI.h>
 #include <mado/MdnsResponder.h>
 #include <mado/NetworkAction.h>
@@ -17,7 +16,9 @@
 #include "arduino_secrets.h"
 #include "generated_api.h"
 
-using WebApp = RestApp<EthernetClient, secrets::Provisioned, SDClass, FILE_READ, FILE_WRITE>;
+#include <SdFat.h>
+
+using WebApp = RestApp<EthernetClient, secrets::Provisioned, SdFs, FILE_READ, FILE_WRITE>;
 
 struct LoggingPolicy {
   static constexpr bool kTrustedHostsOnly = false;
@@ -33,6 +34,8 @@ constexpr uint16_t kMacAddress = 8U;
 constexpr uint32_t kDhcpTimeoutMs = 10000UL;
 constexpr uint8_t kEntropyPins = 6U;
 constexpr uint8_t kSdChipSelect = 4U;
+
+SdFs sd_card;
 
 uint8_t mac_address[mado::kMacSize] = {};
 EthernetServer ethernet_server(80);
@@ -82,7 +85,7 @@ void watch_network() {
 }
 
 void setup() {
-  WebApp::begin(next_session(), SD, kSdChipSelect);
+  WebApp::begin(next_session(), sd_card, kSdChipSelect);
   const bool known = mado::load_mac(EEPROM, kMacAddress, mac_address, entropy());
   static_cast<void>(known);
   start_network();

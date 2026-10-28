@@ -2,20 +2,31 @@
 
 ## Hard Rules
 
-### The library MUST build and run on the Uno R3 and the Uno R4
+### The library MUST build and run on the Uno R4 Minima
 
-Madoguchi supports exactly two boards: the Arduino Uno R3, an ATmega328P, and the Arduino Uno R4 Minima, a Renesas RA4M1. Every library feature MUST compile, fit, and serve requests on both, through a W5100, W5500, or ENC28J60 shield. No other board is a target, the Uno R4 WiFi included. The owner raised the floor from the ATmega168 on 2026-10-26, after the measurement showed Ethernet 2.0.2 alone takes 11,208 of the ATmega168's 14,336 bytes of flash, and narrowed support to the R3 and R4 Minima the same day, after the full REST example measured 41,478 bytes on the R3 and the UNO Q proved to give sketches no socket API.
+Madoguchi supports exactly one board: the Arduino Uno R4 Minima, a Renesas RA4M1, through a W5100, W5500, or ENC28J60 shield and an SD card. No other board is a target: not the Uno R3, not the Uno R4 WiFi, not the UNO Q. The owner dropped the Uno R3 on 2026-10-27, after FormAndQuery, JsonApi and EthernetENC measured 32,746, 37,964 and 36,932 bytes with an SD card against the R3's 32,256, and removed the examples written for it. The examples are the eight REST examples and RestFormat, which the owner asked for on 2026-10-27: it wipes a card with 0x00 and 0xFF, verifies both passes and formats it for SdFat, answers JSON only, and has no `SD Card` folder because it loads nothing into a browser.
 
-- Uno R3 budget: 32,256 bytes of flash after the bootloader, and 2,048 bytes of SRAM shared with the stack, the network driver, and the sketch.
 - Uno R4 Minima budget: 262,144 bytes of flash and 32,768 bytes of SRAM.
-- Every classic example, including SD file serving, MUST fit the Uno R3. A library feature that cannot fit next to Ethernet 2.0.2 and SD 1.3.0 on the Uno R3 MUST stay out of the library.
-- The REST examples, RestApi, RestAuth, RestGet, RestPost, RestPut, RestPatch, RestDelete, and RestFiles, combine authentication, JSON bodies, static assets, and OpenAPI docs, and MUST fit the Uno R4 Minima. They MAY exceed the Uno R3.
-- The minimal example MUST leave at least 1,024 bytes of SRAM free for the stack on the ATmega328P.
+- Every example MUST fit the Uno R4 Minima next to Ethernet 2.0.2 or EthernetENC 2.0.5 and SdFat 2.3.0.
+- Card access MUST go through SdFat 2.3.0, `SdFs` and `FsFile`, not the Arduino SD library: SD 1.3.0 reads only 8.3 names, and SdFat reads long names on FAT16, FAT32 and exFAT. The owner chose SdFat on 2026-10-27.
+- A sketch MUST include `<SdFat.h>` in its own include block after every Madoguchi and app header. The R4 core defines `F()` as a function, so SdFat's `#ifndef F` guard passes and it defines `F(str)` as a plain string, which breaks every `F()` that follows.
 - Prefer opt-in by reference, so the linker drops what a sketch never calls, over a compile-time switch.
 - The library MUST NOT allocate on the heap. Fixed buffers only, sized by compile-time constants.
 - Constant strings and tables MUST live in flash: `F()`, `PROGMEM`, and `pgm_read_byte`.
-- CI MUST build every classic example for the Uno R3 and the Uno R4 Minima, every REST example for the Uno R4 Minima, and fail when flash or SRAM use crosses the budget of a board it targets. CI MUST NOT build for any other board.
-- A change that raises flash or SRAM use on the Uno R3 or the Uno R4 Minima MUST state the before and after numbers in its pull request.
+- CI MUST build every example for the Uno R4 Minima and fail when flash or SRAM use crosses its budget. CI MUST NOT build for any other board.
+- A change that raises flash or SRAM use MUST state the before and after numbers in its pull request.
+
+### No asset in C or C++ code
+
+No HTML, CSS, JavaScript, image, font, document or OpenAPI file MAY exist inside C or C++ code: not as a string, not as a byte array, not generated into a header. The board MUST read every file a client asks for from the SD card and serve it. Responses that code builds from data, such as JSON documents, RFC 9457 problems, and short `text/plain` messages, are data and MAY be written by code. The owner set this rule on 2026-10-27.
+
+- Every example that gives a client anything to load MUST keep it in an `SD Card` folder inside the example.
+- Each `SD Card` folder MUST be a separate web project, built by its own tooling into the files copied to the card: HTML that follows current standards, light and dark mode, TypeScript in place of JavaScript, and classless Pico CSS.
+- The build MUST write only names the board serves, 1 to 64 printable ASCII characters per segment with none of `" * / : < > ? \ | %` and a path under 128 bytes with its `.gz` suffix, MUST put a gzip copy named `<file>.gz` next to each file that compresses, and MUST NOT require any step on the board.
+
+### Front-end dependencies come from a CDN
+
+Every third-party front-end dependency, Pico CSS and Swagger UI included, MUST load from a public CDN with an exact version and a Subresource Integrity hash. No third-party front-end file MAY be copied to the SD card or served by the board. The owner set this rule on 2026-10-27.
 
 ### NASA/JPL coding rules
 
@@ -73,11 +84,11 @@ All code in `src/` and [`examples/`](examples) MUST follow the JPL Institutional
 
 #### Analyzer checks that cannot apply
 
-The library targets freestanding C++11 on AVR, which has no `std::array`, `std::span`, or standard library containers. These clang-tidy checks demand those types, so they are disabled in `.clang-tidy` and nowhere else:
+The library is freestanding C++11 and includes no C++ standard library header, so it has no `std::array`, `std::span`, or standard library containers. These clang-tidy checks demand those types, so they are disabled in `.clang-tidy` and nowhere else:
 
 - `cppcoreguidelines-avoid-c-arrays`, `cppcoreguidelines-pro-bounds-constant-array-index`, `cppcoreguidelines-pro-bounds-pointer-arithmetic`: fixed buffers need raw arrays and indexing.
 - `cppcoreguidelines-pro-type-reinterpret-cast`: Arduino's `F()` yields a `const __FlashStringHelper*`, which must be cast to read flash. One function in the library performs that cast.
-- `modernize-*`: those checks propose C++14 and later forms the AVR toolchain does not build.
+- `modernize-*`: those checks propose C++14 and later forms, and the library stays inside C++11.
 
 ## Sources
 

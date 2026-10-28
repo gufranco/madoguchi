@@ -42,11 +42,8 @@ def spec() -> dict[str, object]:
 
 def sketch(root: Path) -> Path:
     folder = root / "Ping"
-    (folder / "www").mkdir(parents=True)
+    folder.mkdir(parents=True)
     (folder / "openapi.json").write_text(json.dumps(spec(), indent=2), encoding="utf-8")
-    (folder / "www" / "index.html").write_text(
-        "<!doctype html><title>p</title>", encoding="utf-8"
-    )
     return folder
 
 
@@ -120,9 +117,9 @@ def test_check_names_a_stale_header(
     # Arrange
     folder = sketch(tmp_path)
     main(["generate", str(folder)])
-    (folder / "www" / "index.html").write_text(
-        "<!doctype html><title>q</title>", encoding="utf-8"
-    )
+    changed = spec()
+    changed["paths"]["/api/pong"] = {"get": {"operationId": "pong", "responses": {}}}
+    (folder / "openapi.json").write_text(json.dumps(changed), encoding="utf-8")
 
     # Act
     code = main(["check", str(folder)])

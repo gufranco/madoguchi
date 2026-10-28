@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 from typing import cast
 
-from .assets import AssetError, collect_assets
 from .emit import render_api, same_output, snake
 from .provision import (
     DEFAULT_ITERATIONS,
@@ -25,7 +24,6 @@ from .provision import (
 from .spec import Api, Json, SpecError, parse_api
 
 SPEC_FILE = "openapi.json"
-SITE_FOLDER = "www"
 OUTPUT_FILE = "generated_api.h"
 SECRETS_FILE = "arduino_secrets.h"
 
@@ -39,13 +37,8 @@ def load_api(folder: Path) -> tuple[Json, Api]:
 
 
 def render_sketch(folder: Path) -> str:
-    document, api = load_api(folder)
-    served = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode(
-        "utf-8"
-    )
-    namespace = snake(folder.resolve().name)
-    assets = collect_assets(folder / SITE_FOLDER, served, api.buffers.document_max_age)
-    return render_api(api, assets, namespace)
+    _, api = load_api(folder)
+    return render_api(api, snake(folder.resolve().name))
 
 
 def generate(folders: list[Path]) -> int:
@@ -146,7 +139,6 @@ def main(argv: list[str]) -> int:
         return run(options)
     except (
         SpecError,
-        AssetError,
         SecretsError,
         OSError,
         json.JSONDecodeError,

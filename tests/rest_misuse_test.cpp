@@ -7,10 +7,8 @@
 #include <string>
 
 #include "ExchangeHarness.h"
-#include "mado/Asset.h"
 #include "mado/Base64UrlDecoder.h"
 #include "mado/HmacSha256.h"
-#include "mado/HttpVersion.h"
 #include "mado/JsonReader.h"
 #include "mado/JsonStatus.h"
 #include "mado/KeyMemory.h"
@@ -18,7 +16,6 @@
 #include "mado/MemorySource.h"
 #include "mado/Method.h"
 #include "mado/Pbkdf2Params.h"
-#include "mado/RequestLine.h"
 #include "mado/Route.h"
 #include "mado/Sha256.h"
 #include "mado/SlotTable.h"
@@ -29,7 +26,6 @@
 #include "mado/kSha256Size.h"
 #include "mado/parse_token_claims.h"
 #include "mado/pbkdf2_sha256.h"
-#include "mado/send_asset.h"
 #include "mado/send_method_not_allowed.h"
 #include "mado/verify_bearer.h"
 
@@ -324,75 +320,6 @@ TEST(EtagMatches, RejectsAMissingTag) {
 
   // Assert
   EXPECT_FALSE(matched);
-}
-
-const uint8_t kAssetBody[] PROGMEM = {0x1FU, 0x8BU, 0x08U};
-const char* const kAssetHeaders[] = {"Accept-Encoding", "If-None-Match", nullptr};
-
-mado::Asset page_asset() {
-  return mado::Asset{
-      &kAssetBody[0],
-      sizeof(kAssetBody),
-      F("Content-Type: text/html\r\nContent-Security-Policy: x\r\n"),
-      F("ETag: \"t\"\r\n"),
-      F("\"t\""),
-  };
-}
-
-TEST(SendAsset, RefusesWhenAResponseHasStarted) {
-  // Arrange
-  ExchangeHarness harness;
-  HarnessExchange exchange = harness.make();
-  static_cast<void>(exchange.send_status(200U));
-
-  // Act
-  const bool sent = mado::send_asset(exchange, page_asset());
-
-  // Assert
-  EXPECT_FALSE(sent);
-}
-
-TEST(SendAsset, ReportsAFailedNotModified) {
-  // Arrange
-  ExchangeHarness harness;
-  harness.capture(&kAssetHeaders[0], 1U, "\"t\"");
-  harness.detach_output();
-  HarnessExchange exchange = harness.make();
-
-  // Act
-  const bool sent = mado::send_asset(exchange, page_asset());
-
-  // Assert
-  EXPECT_FALSE(sent);
-}
-
-TEST(SendAsset, ReportsAFailedNotAcceptable) {
-  // Arrange
-  ExchangeHarness harness;
-  harness.detach_output();
-  HarnessExchange exchange = harness.make();
-
-  // Act
-  const bool sent = mado::send_asset(exchange, page_asset());
-
-  // Assert
-  EXPECT_FALSE(sent);
-}
-
-TEST(SendAsset, AnswersHeadWithHeadersOnlyForPages) {
-  // Arrange
-  ExchangeHarness harness;
-  harness.set_line(
-      mado::RequestLine{mado::Method::kHead, "/", "", true, mado::HttpVersion::kHttp11});
-  harness.capture(&kAssetHeaders[0], 0U, "gzip");
-  HarnessExchange exchange = harness.make();
-
-  // Act
-  const bool sent = mado::send_asset(exchange, page_asset());
-
-  // Assert
-  EXPECT_TRUE(sent);
-  EXPECT_NE(harness.sent().find("Content-Security-Policy: x\r\n"), std::string::npos);
 }
 
 using MemoryReader = mado::JsonReader<mado::MemorySource>;
@@ -752,27 +679,5 @@ TEST(Base64UrlDecoder, RefusesToFinishAfterABadSymbol) {
   // Assert
   EXPECT_EQ(count, -1);
 }
-
-class IncompleteAssetTest : public ::testing::TestWithParam<mado::Asset> {};
-
-TEST_P(IncompleteAssetTest, RefusesToSendIt) {
-  // Arrange
-  ExchangeHarness harness;
-  harness.capture(&kAssetHeaders[0], 0U, "gzip");
-  HarnessExchange exchange = harness.make();
-
-  // Act
-  const bool sent = mado::send_asset(exchange, GetParam());
-
-  // Assert
-  EXPECT_FALSE(sent);
-  EXPECT_EQ(harness.sent(), "");
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    Assets, IncompleteAssetTest,
-    ::testing::Values(mado::Asset{&kAssetBody[0], 0U, F("text/html"), F("\"t\""), nullptr},
-                      mado::Asset{&kAssetBody[0], 3U, nullptr, F("\"t\""), nullptr},
-                      mado::Asset{&kAssetBody[0], 3U, F("text/html"), nullptr, nullptr}));
 
 }

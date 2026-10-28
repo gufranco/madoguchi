@@ -9,10 +9,13 @@
 #include "FakeClient.h"
 #include "FakeClock.h"
 #include "FakeData.h"
+#include "FakeSd.h"
 
 namespace {
 
-using App = PutApp<FakeClient>;
+constexpr const char* kSpecText = R"({"openapi":"3.1.0"})";
+
+using App = PutApp<FakeClient, FakeSd, FILE_READ>;
 using AppServer = mado::Server<FakeClient, App, rest_put::Limits>;
 
 std::string body_of(const std::string& response) {
@@ -34,7 +37,8 @@ class PutHarness {
  public:
   PutHarness() {
     fake_clock::set(0U);
-    App::begin();
+    card_.files()["/openapi.json"] = kSpecText;
+    App::begin(card_, 4U);
   }
 
   std::string send(const ExchangePut& request) {
@@ -46,6 +50,7 @@ class PutHarness {
   }
 
  private:
+  FakeSd card_;
   AppServer server_{&rest_put::kRoutes[0], &rest_put::kHeaderNames[0]};
 };
 

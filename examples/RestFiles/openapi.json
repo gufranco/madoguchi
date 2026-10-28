@@ -3,7 +3,7 @@
   "info": {
     "title": "Madoguchi SD files",
     "version": "1.0.0",
-    "description": "Lists, downloads, uploads and deletes files in the root folder of the SD card. Names are 8.3, such as LOG.TXT. This example has no login: add the one from RestAuth before the board is reachable from an untrusted network."
+    "description": "Lists, downloads, uploads and deletes files in the root folder of the SD card. Names are 1 to 64 printable ASCII characters, such as holiday photo.jpeg. This example has no login: add the one from RestAuth before the board is reachable from an untrusted network."
   },
   "servers": [
     {
@@ -27,7 +27,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "maxLength": 12
+            "maxLength": 64
           },
           "size": {
             "type": "integer",
@@ -102,10 +102,10 @@
           "name": "name",
           "in": "path",
           "required": true,
-          "description": "An 8.3 file name",
+          "description": "A file name of 1 to 64 printable ASCII characters",
           "schema": {
             "type": "string",
-            "maxLength": 12
+            "maxLength": 64
           }
         }
       ],
@@ -169,7 +169,7 @@
             "description": "The copy the client holds is current"
           },
           "400": {
-            "description": "The name is not an 8.3 name",
+            "description": "The name is not a valid file name",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -236,7 +236,7 @@
             "description": "Replaced"
           },
           "400": {
-            "description": "The name is not an 8.3 name, or the body ended early",
+            "description": "The name is not a valid file name, or the body ended early",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -295,7 +295,7 @@
             "description": "Deleted"
           },
           "400": {
-            "description": "The name is not an 8.3 name",
+            "description": "The name is not a valid file name",
             "content": {
               "application/problem+json": {
                 "schema": {

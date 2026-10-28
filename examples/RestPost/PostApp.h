@@ -23,26 +23,33 @@ struct PostState {
   mado::SlotTable<rest_post::Item, kPostSlots> items;
 };
 
-template <typename ClientT>
+template <typename ClientT, typename SdT, uint16_t kReadMode>
 struct PostApp {
   using Exchange = mado::Exchange<ClientT, rest_post::Limits>;
+
+  static SdT*& card() {
+    static SdT* instance = nullptr;
+    return instance;
+  }
 
   static PostState& state() {
     static PostState instance = {};
     return instance;
   }
 
-  static void begin() {
+  static void begin(SdT& sd, const uint8_t chip_select) {
     state() = PostState{};
+    card() = sd.begin(chip_select) ? &sd : nullptr;
   }
 
   static bool handle(Exchange& exchange, const uint8_t route) {
-    const bool known = mado::check(route <= rest_post::kStaticAsset);
+    const bool known = mado::check(route <= rest_post::kCardFile);
     if (!known) {
       return exchange.send_empty(mado::http::kNotFound);
     }
-    return (route == rest_post::kCreateItem) ? create_item(exchange)
-                                             : rest_post::send_static_asset(exchange);
+    return (route == rest_post::kCreateItem)
+               ? create_item(exchange)
+               : rest_post::send_card<kReadMode>(exchange, card(), route);
   }
 
  private:

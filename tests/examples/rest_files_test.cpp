@@ -74,6 +74,21 @@ TEST_F(RestFilesTest, ListsTheRootFolder) {
                                R"({"name":"LOG.TXT","size":5,"directory":false}])");
 }
 
+TEST_F(RestFilesTest, ListsLongNamesAndSkipsOnesTooLongToServe) {
+  // Arrange
+  sd().files()["/holiday photo (2).jpeg"] = "abc";
+  sd().files()["/" + std::string(65U, 'n')] = "x";
+  sd().files()["/z.txt"] = "12";
+
+  // Act
+  const std::string response = send("GET /api/files HTTP/1.1");
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
+  EXPECT_EQ(body_of(response), R"([{"name":"holiday photo (2).jpeg","size":3,"directory":false},)"
+                               R"({"name":"z.txt","size":2,"directory":false}])");
+}
+
 TEST_F(RestFilesTest, DownloadsAWholeFileWithAWeakTag) {
   // Arrange
   const std::string content = data().word(40U);
@@ -195,7 +210,9 @@ TEST_F(RestFilesTest, AnswersNotFoundAndBadName) {
 
   // Assert
   EXPECT_EQ(status_line(missing), "HTTP/1.1 404 Not Found");
-  EXPECT_EQ(status_line(send("GET /api/files/LONGNAME1.TXT HTTP/1.1")), "HTTP/1.1 400 Bad Request");
+  EXPECT_EQ(status_line(send("GET /api/files/a%3Fb.txt HTTP/1.1")), "HTTP/1.1 400 Bad Request");
+  EXPECT_EQ(status_line(send("GET /api/files/" + std::string(65U, 'a') + " HTTP/1.1")),
+            "HTTP/1.1 400 Bad Request");
   EXPECT_EQ(status_line(send("GET /api/files/..%2FX HTTP/1.1")), "HTTP/1.1 400 Bad Request");
   EXPECT_EQ(status_line(send("DELETE /api/files/NONE.TXT HTTP/1.1")), "HTTP/1.1 404 Not Found");
 }
@@ -212,6 +229,47 @@ TEST_F(RestFilesTest, CreatesAFileAndPointsAtIt) {
   EXPECT_NE(response.find("Location: /api/files/NEW.TXT\r\n"), std::string::npos);
   EXPECT_EQ(sd().files().at("/NEW.TXT"), content);
   EXPECT_EQ(sd().files().count("/UPLOAD.TMP"), 0U);
+}
+
+TEST_F(RestFilesTest, StoresALongNameAndEncodesItsLocation) {
+  // Arrange
+  const std::string content = data().word(40U);
+
+  // Act
+  const std::string response =
+      send("PUT /api/files/holiday%20photo%20(2).jpeg HTTP/1.1", "", content);
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 201 Created");
+  EXPECT_NE(response.find("Location: /api/files/holiday%20photo%20%282%29.jpeg\r\n"),
+            std::string::npos);
+  EXPECT_EQ(sd().files().at("/holiday photo (2).jpeg"), content);
+}
+
+TEST_F(RestFilesTest, NamesALongFileInTheDownloadHeader) {
+  // Arrange
+  sd().files()["/swagger-initializer.js"] = data().word(12U);
+
+  // Act
+  const std::string response = send("GET /api/files/swagger-initializer.js?download=1 HTTP/1.1");
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 200 OK");
+  EXPECT_NE(
+      response.find("Content-Disposition: attachment; filename=\"swagger-initializer.js\"\r\n"),
+      std::string::npos);
+}
+
+TEST_F(RestFilesTest, RefusesToServeAFileOverFourGibibytes) {
+  // Arrange
+  sd().files()["/movie.mkv"] = "x";
+  sd().report_size("/movie.mkv", 0x100000000ULL);
+
+  // Act
+  const std::string response = send("GET /api/files/movie.mkv HTTP/1.1");
+
+  // Assert
+  EXPECT_EQ(status_line(response), "HTTP/1.1 500 Internal Server Error");
 }
 
 TEST_F(RestFilesTest, ReplacesAFileThatMatchesItsDigest) {
@@ -308,8 +366,10 @@ TEST_F(RestFilesTest, RetriesACardThatWasMissing) {
   EXPECT_EQ(sd().begins(), 4U);
 }
 
-TEST_F(RestFilesTest, ServesTheSiteFromFlash) {
+TEST_F(RestFilesTest, ServesTheSiteFromTheCard) {
   // Arrange
+  sd().files()["/index.html"] = "<!doctype html>";
+  sd().files()["/index.html.gz"] = "\x1F\x8B";
   const std::string line = "GET / HTTP/1.1";
 
   // Act

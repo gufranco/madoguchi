@@ -15,7 +15,7 @@ namespace mado {
 constexpr uint8_t kNoCount = 0xFFU;
 constexpr uint8_t kMaxCountDigits = 3U;
 
-template <uint8_t kReadMode, typename SdT>
+template <uint16_t kReadMode, typename SdT>
 uint8_t read_count_file(SdT& card, const char* const path) {
   const bool valid = check(path != nullptr);
   if ((!valid) || (!card.exists(path))) {
@@ -40,7 +40,7 @@ uint8_t read_count_file(SdT& card, const char* const path) {
   return parsed ? static_cast<uint8_t>(value) : kNoCount;
 }
 
-template <uint8_t kReadMode, uint8_t kWriteMode, typename SdT>
+template <uint16_t kReadMode, uint16_t kWriteMode, typename SdT>
 bool write_count_file(SdT& card, const char* const path, const char* const temporary,
                       const uint8_t value) {
   const bool valid = check(path != nullptr) && check(temporary != nullptr);

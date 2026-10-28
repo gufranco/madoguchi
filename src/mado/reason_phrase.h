@@ -21,6 +21,7 @@ inline const char* reason_phrase(const uint16_t code) {
     case http::kContinue: return PSTR("Continue");
     case http::kOk: return PSTR("OK");
     case http::kCreated: return PSTR("Created");
+    case http::kAccepted: return PSTR("Accepted");
     case http::kNoContent: return PSTR("No Content");
     case http::kPartialContent: return PSTR("Partial Content");
     case http::kMovedPermanently: return PSTR("Moved Permanently");
@@ -34,6 +35,7 @@ inline const char* reason_phrase(const uint16_t code) {
     case http::kMethodNotAllowed: return PSTR("Method Not Allowed");
     case http::kNotAcceptable: return PSTR("Not Acceptable");
     case http::kRequestTimeout: return PSTR("Request Timeout");
+    case http::kConflict: return PSTR("Conflict");
     case http::kLengthRequired: return PSTR("Length Required");
     case http::kContentTooLarge: return PSTR("Content Too Large");
     case http::kUriTooLong: return PSTR("URI Too Long");

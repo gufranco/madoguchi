@@ -19,7 +19,7 @@
 #include "http_status.h"
 #include "kMaxStringScan.h"
 #include "parse_byte_range.h"
-#include "valid_short_name.h"
+#include "valid_card_name.h"
 
 namespace mado {
 
@@ -60,7 +60,7 @@ bool stream_file(ExchangeT& exchange, FileT& file, const uint32_t size) {
 
 namespace detail {
 
-constexpr uint8_t kContentRangeSize = 40U;
+constexpr uint8_t kHeaderTextSize = 96U;
 
 inline uint8_t append_text(char* const out, const uint8_t offset, const char* const flash_text) {
   const bool valid = check(out != nullptr) && check(flash_text != nullptr);
@@ -68,7 +68,7 @@ inline uint8_t append_text(char* const out, const uint8_t offset, const char* co
     return offset;
   }
   const size_t length = strlen_P(flash_text);
-  const bool fits = check((offset + length) < kContentRangeSize);
+  const bool fits = check((offset + length) < kHeaderTextSize);
   uint8_t used = offset;
   for (size_t i = 0U; fits && (i < length); ++i) {
     out[used] = static_cast<char>(pgm_read_byte(flash_text + i));
@@ -79,7 +79,7 @@ inline uint8_t append_text(char* const out, const uint8_t offset, const char* co
 }
 
 inline uint8_t append_number(char* const out, const uint8_t offset, const DecimalText& digits) {
-  const bool fits = check(out != nullptr) && check((offset + digits.length()) < kContentRangeSize);
+  const bool fits = check(out != nullptr) && check((offset + digits.length()) < kHeaderTextSize);
   uint8_t used = offset;
   for (uint8_t i = 0U; fits && (i < digits.length()); ++i) {
     out[used] = digits.begin()[i];
@@ -90,7 +90,7 @@ inline uint8_t append_number(char* const out, const uint8_t offset, const Decima
 }
 
 inline bool content_range(const ByteRange& range, const uint32_t size, const bool satisfiable,
-                          char (&out)[kContentRangeSize]) {
+                          char (&out)[kHeaderTextSize]) {
   const bool ordered = check(range.first <= range.last) || check(!satisfiable);
   uint8_t used = append_text(&out[0], 0U, PSTR("bytes "));
   if (satisfiable) {
@@ -102,7 +102,7 @@ inline bool content_range(const ByteRange& range, const uint32_t size, const boo
   }
   used = append_text(&out[0], used, PSTR("/"));
   used = append_number(&out[0], used, DecimalText(size));
-  return ordered && check(used < kContentRangeSize);
+  return ordered && check(used < kHeaderTextSize);
 }
 
 template <typename ExchangeT>
@@ -130,9 +130,9 @@ bool send_file_head(ExchangeT& exchange, const uint16_t code, const FileReply& r
 }
 
 inline uint8_t append_name(char* const out, const uint8_t offset, const char* const name) {
-  const bool valid = check(out != nullptr) && valid_short_name(name);
+  const bool valid = check(out != nullptr) && valid_card_name(name);
   uint8_t used = offset;
-  for (uint8_t i = 0U; valid && (i < kShortNameSize) && (used < (kContentRangeSize - 1U)); ++i) {
+  for (uint8_t i = 0U; valid && (i < kCardNameSize) && (used < (kHeaderTextSize - 1U)); ++i) {
     if (name[i] == '\0') {
       break;
     }
@@ -149,14 +149,14 @@ bool send_disposition(ExchangeT& exchange, const char* const download_name) {
   if ((!ready) || (download_name == nullptr)) {
     return ready;
   }
-  char value[kContentRangeSize] = {};
+  char value[kHeaderTextSize] = {};
   uint8_t used = append_text(&value[0], 0U, PSTR("attachment"));
-  if (valid_short_name(download_name)) {
+  if (valid_card_name(download_name)) {
     used = append_text(&value[0], used, PSTR("; filename=\""));
     used = append_name(&value[0], used, download_name);
     used = append_text(&value[0], used, PSTR("\""));
   }
-  const bool fits = check(used < kContentRangeSize);
+  const bool fits = check(used < kHeaderTextSize);
   return fits && exchange.send_header(F("Content-Disposition"), &value[0]);
 }
 
@@ -188,7 +188,7 @@ bool send_not_modified(ExchangeT& exchange, const char* const etag) {
 
 template <typename ExchangeT>
 bool send_unsatisfiable(ExchangeT& exchange, const uint32_t size) {
-  char range_text[kContentRangeSize] = {};
+  char range_text[kHeaderTextSize] = {};
   const ByteRange none = {0U, 0U};
   const bool formatted = content_range(none, size, false, range_text);
   const bool status = exchange.send_status(http::kRangeNotSatisfiable);
@@ -220,7 +220,7 @@ bool send_file(ExchangeT& exchange, FileT& file, const FileReply& reply) {
   const uint32_t length = partial ? ((range.last - range.first) + 1U) : reply.size;
   const bool head =
       detail::send_file_head(exchange, partial ? http::kPartialContent : http::kOk, reply, length);
-  char range_text[detail::kContentRangeSize] = {};
+  char range_text[detail::kHeaderTextSize] = {};
   const bool ranged = (!partial) || (detail::content_range(range, reply.size, true, range_text) &&
                                      exchange.send_header(F("Content-Range"), &range_text[0]));
   const bool named = head && ranged && detail::send_disposition(exchange, reply.download_name);

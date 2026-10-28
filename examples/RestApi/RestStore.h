@@ -23,7 +23,7 @@ constexpr uint8_t kStoreSlots = 4U;
 const char kStoreTemporary[] PROGMEM = "/STORE.TMP";
 const char kStoreLogin[] PROGMEM = "/LOGIN.TXT";
 
-template <typename SdT, uint8_t kReadMode, uint8_t kWriteMode>
+template <typename SdT, uint16_t kReadMode, uint16_t kWriteMode>
 class RestStore {
  public:
   using FileT = decltype(mado::reference_to<SdT>().open("", kReadMode));

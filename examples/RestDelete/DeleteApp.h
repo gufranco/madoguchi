@@ -22,28 +22,35 @@ struct DeleteState {
   mado::SlotTable<rest_delete::Item, kDeleteSlots> items;
 };
 
-template <typename ClientT>
+template <typename ClientT, typename SdT, uint16_t kReadMode>
 struct DeleteApp {
   using Exchange = mado::Exchange<ClientT, rest_delete::Limits>;
+
+  static SdT*& card() {
+    static SdT* instance = nullptr;
+    return instance;
+  }
 
   static DeleteState& state() {
     static DeleteState instance = {};
     return instance;
   }
 
-  static void begin() {
+  static void begin(SdT& sd, const uint8_t chip_select) {
     state() = DeleteState{};
+    card() = sd.begin(chip_select) ? &sd : nullptr;
     seed("lamp", true);
     seed("fan", false);
   }
 
   static bool handle(Exchange& exchange, const uint8_t route) {
-    const bool known = mado::check(route <= rest_delete::kStaticAsset);
+    const bool known = mado::check(route <= rest_delete::kCardFile);
     if (!known) {
       return exchange.send_empty(mado::http::kNotFound);
     }
-    return (route == rest_delete::kDeleteItem) ? delete_item(exchange, route)
-                                               : rest_delete::send_static_asset(exchange);
+    return (route == rest_delete::kDeleteItem)
+               ? delete_item(exchange, route)
+               : rest_delete::send_card<kReadMode>(exchange, card(), route);
   }
 
  private:

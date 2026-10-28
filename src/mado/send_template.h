@@ -4,112 +4,103 @@
 #ifndef MADO_SEND_TEMPLATE_H
 #define MADO_SEND_TEMPLATE_H
 
-#include <Arduino.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "check.h"
-#include "flash_address.h"
-#include "kMaxStringScan.h"
 
 namespace mado {
 
 constexpr uint8_t kMaxTagLength = 16U;
-constexpr uint16_t kMaxTemplateLength = 0x7FFFU;
+constexpr uint8_t kMaxDollarRun = 16U;
+constexpr uint32_t kMaxTemplateBytes = 1048576UL;
 
 namespace detail {
 
-inline bool is_tag_char(const char symbol) {
+inline bool is_tag_char(const int16_t symbol) {
+  const bool known = check((symbol >= -1) && (symbol <= 0xFF));
   const bool alpha = ((symbol >= 'a') && (symbol <= 'z')) || ((symbol >= 'A') && (symbol <= 'Z'));
   const bool digit = (symbol >= '0') && (symbol <= '9');
-  return alpha || digit || (symbol == '_');
+  return known && (alpha || digit || (symbol == '_'));
 }
 
-struct FlashPage {
-  const char* text;
-  size_t length;
+struct TagScan {
+  uint8_t length;
+  int16_t stop;
 };
 
-inline uint8_t read_tag(const FlashPage& page, const size_t start, char* const tag) {
-  const bool valid = check(page.text != nullptr) && check(tag != nullptr);
-  if (!valid) {
-    return 0U;
-  }
-  uint8_t tag_length = 0U;
+template <typename SourceT>
+TagScan scan_tag(SourceT& source, char (&tag)[kMaxTagLength + 1U]) {
+  TagScan scan = {0U, -1};
   for (uint8_t i = 0U; i <= kMaxTagLength; ++i) {
-    const size_t position = start + i;
-    if (position >= page.length) {
-      return 0U;
-    }
-    const char symbol = static_cast<char>(pgm_read_byte(page.text + position));
-    if (symbol == '$') {
-      tag[tag_length] = '\0';
-      return tag_length;
-    }
-    if ((!is_tag_char(symbol)) || (tag_length >= kMaxTagLength)) {
-      return 0U;
-    }
-    tag[tag_length] = symbol;
-    ++tag_length;
-  }
-  return 0U;
-}
-
-template <typename ExchangeT, typename TagsT>
-size_t emit_tag(ExchangeT& exchange, const char* const tag) {
-  const bool named = check(tag != nullptr) && check(tag[0] != '\0');
-  if (!named) {
-    return 0U;
-  }
-  const bool rendered = TagsT::render(exchange, tag);
-  if (rendered) {
-    return 0U;
-  }
-  size_t written = exchange.write(static_cast<uint8_t>('$'));
-  written += exchange.print(tag);
-  written += exchange.write(static_cast<uint8_t>('$'));
-  return written;
-}
-
-}
-
-template <typename ExchangeT, typename TagsT>
-bool send_template(ExchangeT& exchange, const __FlashStringHelper* const page) {
-  const bool valid = check(page != nullptr);
-  if (!valid) {
-    return false;
-  }
-  const char* const text = flash_address(page);
-  const size_t length = strlen_P(text);
-  const bool fits = check(length <= kMaxTemplateLength);
-  if (!fits) {
-    return false;
-  }
-  char tag[kMaxTagLength + 1U] = {};
-  const detail::FlashPage page_text = {text, length};
-  size_t index = 0U;
-  for (uint16_t step = 0U; (step <= kMaxTemplateLength) && (index < length); ++step) {
-    const bool in_page = check(index < length);
-    if (!in_page) {
+    const int16_t symbol = source.next();
+    const bool in_tag = is_tag_char(symbol) && (scan.length < kMaxTagLength);
+    if (!in_tag) {
+      scan.stop = symbol;
       break;
     }
-    const char symbol = static_cast<char>(pgm_read_byte(text + index));
-    uint8_t tag_length = 0U;
-    if (symbol == '$') {
-      tag_length = detail::read_tag(page_text, index + 1U, &tag[0]);
-    }
-    if (tag_length > 0U) {
-      static_cast<void>(detail::emit_tag<ExchangeT, TagsT>(exchange, &tag[0]));
-      index += static_cast<size_t>(tag_length) + 2U;
-      continue;
-    }
-    const size_t written = exchange.write(static_cast<uint8_t>(symbol));
-    if (written == 0U) {
+    tag[scan.length] = static_cast<char>(symbol);
+    scan.length = static_cast<uint8_t>(scan.length + 1U);
+  }
+  tag[scan.length] = '\0';
+  const bool bounded = check(scan.length <= kMaxTagLength);
+  return bounded ? scan : TagScan{0U, -1};
+}
+
+template <typename ExchangeT>
+bool write_unmatched(ExchangeT& exchange, const char* const tag, const int16_t stop) {
+  const bool valid = check(tag != nullptr) && check(stop <= 0xFF);
+  if (!valid) {
+    return false;
+  }
+  const bool opened = exchange.write(static_cast<uint8_t>('$')) == 1U;
+  const bool body = opened && ((tag[0] == '\0') || (exchange.print(tag) > 0U));
+  const bool tail = (stop < 0) || (exchange.write(static_cast<uint8_t>(stop)) == 1U);
+  return body && tail;
+}
+
+template <typename ExchangeT, typename TagsT, typename SourceT>
+bool copy_tag(ExchangeT& exchange, SourceT& source) {
+  char tag[kMaxTagLength + 1U] = {};
+  for (uint8_t run = 0U; run < kMaxDollarRun; ++run) {
+    const TagScan scan = scan_tag(source, tag);
+    const bool sane =
+        check(tag[scan.length] == '\0') && check((scan.stop >= -1) && (scan.stop <= 0xFF));
+    if (!sane) {
       return false;
     }
-    ++index;
+    const bool doubled = (scan.stop == '$') && (scan.length == 0U);
+    if (doubled) {
+      const bool kept = exchange.write(static_cast<uint8_t>('$')) == 1U;
+      if (!kept) {
+        return false;
+      }
+      continue;
+    }
+    const bool closed = scan.stop == '$';
+    if (closed && TagsT::render(exchange, &tag[0])) {
+      return true;
+    }
+    return write_unmatched(exchange, &tag[0], scan.stop);
   }
-  return index >= length;
+  return exchange.write(static_cast<uint8_t>('$')) == 1U;
+}
+
+}
+
+template <typename ExchangeT, typename TagsT, typename SourceT>
+bool send_template(ExchangeT& exchange, SourceT& source) {
+  bool written = true;
+  for (uint32_t step = 0U; written && (step < kMaxTemplateBytes); ++step) {
+    const int16_t symbol = source.next();
+    if (symbol < 0) {
+      return check(symbol == -1);
+    }
+    const bool in_range = check(symbol <= 0xFF);
+    written = in_range && ((symbol == '$') ? detail::copy_tag<ExchangeT, TagsT>(exchange, source)
+                                           : (exchange.write(static_cast<uint8_t>(symbol)) == 1U));
+  }
+  return false;
 }
 
 }

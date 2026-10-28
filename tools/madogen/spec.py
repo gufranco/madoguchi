@@ -21,8 +21,6 @@ DEFAULT_BUFFER_SIZE = 32
 MIN_OUTPUT_BUFFER = 8
 MAX_OUTPUT_BUFFER = 1460
 MAX_FILE_CHUNK = 1024
-DEFAULT_DOCUMENT_MAX_AGE = 300
-MAX_DOCUMENT_MAX_AGE = 86400
 CAPTURED_HEADER_LIMIT = 8
 BASE_HEADERS = ("Authorization", "Content-Type", "Accept-Encoding", "If-None-Match")
 SCHEMA_NAME = re.compile(r"^[A-Z][A-Za-z0-9]*$")
@@ -80,7 +78,6 @@ class Operation:
 class Buffers:
     output: int = DEFAULT_BUFFER_SIZE
     file_chunk: int = DEFAULT_BUFFER_SIZE
-    document_max_age: int = DEFAULT_DOCUMENT_MAX_AGE
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +86,7 @@ class Api:
     schemas: tuple[Schema, ...]
     operations: tuple[Operation, ...]
     buffers: Buffers = Buffers()
+    card: bool = True
 
 
 def escape(name: str) -> str:
@@ -367,30 +365,23 @@ def buffer_size(node: Json, key: str, bounds: tuple[int, int]) -> int:
     return value
 
 
-def checked_age(age: int) -> int:
-    if not 0 <= age <= MAX_DOCUMENT_MAX_AGE:
-        raise SpecError(
-            "/x-mado-limits/documentMaxAge", f"must be 0 to {MAX_DOCUMENT_MAX_AGE}"
-        )
-    return age
-
-
 def parse_buffers(document: Json) -> Buffers:
     node = as_object(document.get("x-mado-limits", {}), "/x-mado-limits")
-    known = {"outputBufferSize", "fileChunkSize", "documentMaxAge"}
+    known = {"outputBufferSize", "fileChunkSize"}
     unknown = sorted(set(node) - known)
     if unknown:
         raise SpecError(f"/x-mado-limits/{escape(unknown[0])}", "is not a known limit")
     return Buffers(
         buffer_size(node, "outputBufferSize", (MIN_OUTPUT_BUFFER, MAX_OUTPUT_BUFFER)),
         buffer_size(node, "fileChunkSize", (1, MAX_FILE_CHUNK)),
-        checked_age(
-            as_int(
-                node.get("documentMaxAge", DEFAULT_DOCUMENT_MAX_AGE),
-                "/x-mado-limits/documentMaxAge",
-            )
-        ),
     )
+
+
+def parse_card(document: Json) -> bool:
+    card = document.get("x-mado-card", True)
+    if not isinstance(card, bool):
+        raise SpecError("/x-mado-card", "must be true or false")
+    return card
 
 
 def parse_api(document: Json) -> Api:
@@ -419,4 +410,5 @@ def parse_api(document: Json) -> Api:
         schemas,
         operations,
         parse_buffers(document),
+        parse_card(document),
     )

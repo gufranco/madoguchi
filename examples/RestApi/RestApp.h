@@ -6,6 +6,7 @@
 
 #include <Arduino.h>
 #include <Madoguchi.h>
+#include <mado/FileLength.h>
 #include <mado/FileReply.h>
 #include <mado/LogEntry.h>
 #include <mado/LoginGuard.h>
@@ -21,6 +22,7 @@
 #include <mado/UptimeClock.h>
 #include <mado/check.h>
 #include <mado/constant_time_equal.h>
+#include <mado/file_length.h>
 #include <mado/http_status.h>
 #include <mado/issue_token.h>
 #include <mado/kMaxTokenClaimValue.h>
@@ -47,7 +49,7 @@ const char kRestHostName[] PROGMEM = "madoguchi";
 const char kRestLogPath[] PROGMEM = "/LOG.TXT";
 const char kRestLogOldPath[] PROGMEM = "/LOG.OLD";
 
-template <typename SdT, uint8_t kReadMode, uint8_t kWriteMode>
+template <typename SdT, uint16_t kReadMode, uint16_t kWriteMode>
 struct RestState {
   mado::SlotTable<rest_api::Item, kItemSlots> items;
   mado::UptimeClock clock;
@@ -59,7 +61,8 @@ struct RestState {
   mado::SdLog<SdT, kReadMode, kWriteMode> log{&kRestLogPath[0], &kRestLogOldPath[0], kLogMaxBytes};
 };
 
-template <typename ClientT, typename SecretsT, typename SdT, uint8_t kReadMode, uint8_t kWriteMode>
+template <typename ClientT, typename SecretsT, typename SdT, uint16_t kReadMode,
+          uint16_t kWriteMode>
 struct RestApp {
   using Exchange = mado::Exchange<ClientT, rest_api::Limits>;
   using State = RestState<SdT, kReadMode, kWriteMode>;
@@ -102,7 +105,7 @@ struct RestApp {
 
   static bool handle(Exchange& exchange, const uint8_t route) {
     tick(millis());
-    const bool known = mado::check(route <= rest_api::kStaticAsset);
+    const bool known = mado::check(route <= rest_api::kCardFile);
     if (!known) {
       return mado::send_problem(exchange, mado::Problem{mado::http::kNotFound, nullptr});
     }
@@ -124,7 +127,7 @@ struct RestApp {
       case rest_api::kDeleteItem: return delete_item(exchange, route);
       case rest_api::kReadLog: return read_log(exchange);
       case rest_api::kClearLog: return clear_log(exchange);
-      default: return rest_api::send_static_asset(exchange);
+      default: return rest_api::send_card<kReadMode>(exchange, state().sd, route);
     }
   }
 
@@ -145,14 +148,12 @@ struct RestApp {
       return storage_missing(exchange);
     }
     auto file = state().sd->open(&path[0], kReadMode);
-    const mado::FileReply reply = {static_cast<bool>(file) ? file.size() : 0U,
-                                   F("application/x-ndjson"),
-                                   false,
-                                   nullptr,
-                                   nullptr,
+    const mado::FileLength length =
+        static_cast<bool>(file) ? mado::file_length(file) : mado::FileLength{false, 0U};
+    const mado::FileReply reply = {length.bytes, F("application/x-ndjson"), false, nullptr, nullptr,
                                    F("no-store")};
-    const bool sent = static_cast<bool>(file) ? mado::send_file(exchange, file, reply)
-                                              : storage_missing(exchange);
+    const bool sent =
+        length.fits ? mado::send_file(exchange, file, reply) : storage_missing(exchange);
     file.close();
     return sent;
   }

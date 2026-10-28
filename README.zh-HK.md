@@ -2,7 +2,7 @@
 
 <h1>Madoguchi</h1>
 
-<strong>適用於 Uno R3 及 Uno R4 Minima 的小型 HTTP 伺服器，不使用堆積記憶體，並在 R4 上提供以 JWT 保護的 REST API。</strong>
+<strong>為 Arduino Uno R4 Minima 而設、不使用堆積的 HTTP 伺服器：頁面由 SD 卡提供，REST API 由 OpenAPI 產生並受 JWT 保護。</strong>
 
 <br>
 <br>
@@ -17,6 +17,7 @@
 <p align="center">
   <a href="#快速開始">快速開始</a> |
   <a href="#範例">範例</a> |
+  <a href="#sd-卡網頁項目">SD 卡頁面</a> |
   <a href="#以-openapi-及-jwt-建構的-rest-api">REST API</a> |
   <a href="#開發">開發</a> |
   <a href="CHANGELOG.md">變更記錄</a>
@@ -24,35 +25,32 @@
 
 ---
 
-Madoguchi 可在 Uno R3 的 ATmega328P 上與 Ethernet 程式庫及 SD 程式庫並存，而且完全不在堆積上配置記憶體。在 Uno R4 Minima 上，它提供一個由單一 OpenAPI 文件產生的完整 REST API：JWT 登入、JSON 請求主體、所有 HTTP 方法、`/` 的網站，以及 `/docs` 的 Swagger UI。CI 會為全部 17 個範例建置其目標開發板的韌體，任何超出開發板快閃記憶體或 RAM 預算的建置都會失敗；每次推送及 pull request 都會執行 1,142 個主機測試、113 個工具測試及 12 個頁面腳本測試，並對剖析器進行模糊測試。
+Madoguchi 在裝有 W5x00 或 ENC28J60 擴充板及 SD 卡的 Uno R4 Minima 上運作，而且完全不在堆積上配置記憶體。C++ 程式碼不含任何 HTML、CSS、腳本或圖片：所有頁面都在卡上，由每個範例各自獨立的網頁項目產生。這些項目以 TypeScript 及無類別的 Pico CSS 編寫，由 Vite 建置為記憶卡上的檔案及 gzip 副本。開發板會回應由單一 OpenAPI 文件產生的 REST API，支援 JWT 登入、JSON 請求主體及所有 HTTP 方法。每次推送及 pull request 時，CI 都會建置全部 9 個範例，任何超出開發板快閃記憶體或 RAM 預算的建置都會失敗；同時執行 1,182 個主機測試、91 個工具測試、106 個頁面測試及 32 個瀏覽器測試，建置每張卡，並對剖析器進行模糊測試。
 
 名稱來自日語的「窓口」，即遞交請求、取回答覆的服務窗口。
 
 ## 用法
 
-處理函數是一個按路由 ID 分支的靜態函數。以下是 [`SimpleWebServer`](examples/SimpleWebServer/SimpleWebServer.ino) 的核心部分，它在 Uno R3 上佔用 18,640 位元組快閃記憶體：
+處理函數是一個按路由 ID 分支的靜態函數。頁面來自卡，API 來自程式碼。草稿碼的核心部分：
 
 ```cpp
 struct WebApp {
   static bool handle(WebExchange& exchange, const uint8_t route) {
-    const bool known = route == kIndex;
-    if (!known) {
-      return exchange.send_empty(404U);
+    switch (route) {
+      case kStatus: return send_status_json(exchange);
+      default: return mado::serve_card_file<FILE_READ>(exchange, sd_card);
     }
-    const bool status = exchange.send_status(200U);
-    const bool type = exchange.send_content_type(F("text/html"));
-    const bool ended = exchange.end_headers();
-    const size_t written = exchange.print(F("<html><body><h1>Hello World!</h1></body></html>\n"));
-    return status && type && ended && (written > 0U);
   }
 };
 
-const char kIndexPath[] PROGMEM = "/";
+const char kStatusPath[] PROGMEM = "/api/status";
+const char kCardPath[] PROGMEM = "/*";
 const mado::Route kRoutes[] PROGMEM = {
-    {&kIndexPath[0], mado::Method::kGet, kIndex},
+    {&kStatusPath[0], mado::Method::kGet, kStatus},
+    {&kCardPath[0], mado::Method::kGet, kCard},
     {nullptr, mado::Method::kAny, 0U},
 };
-mado::Server<EthernetClient, WebApp> web(kRoutes, nullptr);
+mado::Server<EthernetClient, WebApp> web(&kRoutes[0], &kHeaderNames[0]);
 
 void loop() {
   EthernetClient client = ethernet_server.available();
@@ -63,7 +61,7 @@ void loop() {
 }
 ```
 
-如沒有等候中的請求，`process()` 會立即返回。否則它會讀取請求，以相符路由的 ID 呼叫 `WebApp::handle`，然後關閉連線。
+如沒有等候中的請求，`process()` 會立即返回。否則它會讀取請求，以相符路由的 ID 呼叫 `WebApp::handle`，然後關閉連線。`serve_card_file()` 把 `/` 對應至 `/index.html`，瀏覽器接受 gzip 時優先傳送檔案旁邊的 `.gz` 副本，並令附雜湊值的檔名快取一年。
 
 ## 快速開始
 
@@ -72,9 +70,10 @@ void loop() {
 | 工具 | 版本 | 用途 |
 |:-----|:--------|:-----------|
 | [arduino-cli](https://arduino.github.io/arduino-cli/) 或 Arduino IDE | CI 使用 arduino-cli 1.5.1 | 為開發板建置 |
-| `arduino:avr` 或 `arduino:renesas_uno` 核心 | 1.8.8 或 1.6.0 | Uno R3 或 Uno R4 Minima |
-| Ethernet 程式庫 | 2.0.2 | 除 EthernetENC 外的所有範例 |
-| CMake 及 C++ 編譯器 | CMake 3.24 或更新版本 | 在電腦上執行 REST API |
+| `arduino:renesas_uno` 核心 | 1.6.0 | Uno R4 Minima |
+| Ethernet 及 SdFat 程式庫 | Ethernet 2.0.2、SdFat 2.3.0 | 所有範例 |
+| Node.js 及 pnpm | Node 24、pnpm 12.15.0 | 建置卡上的頁面 |
+| CMake 及 C++ 編譯器 | CMake 3.24 或以上 | 在電腦上執行 REST API |
 
 ### 安裝
 
@@ -83,35 +82,37 @@ Madoguchi 尚未收錄於 Arduino 程式庫管理員。請從本儲存庫安裝�
 ```sh
 arduino-cli config set library.enable_unsafe_install true
 arduino-cli lib install --git-url https://github.com/gufranco/madoguchi.git
-arduino-cli lib install Ethernet@2.0.2
+arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 ```
 
 在 Arduino IDE 中，將儲存庫下載為 ZIP 檔案，然後使用 **草稿碼 > 匯入程式庫 > 加入 .ZIP 程式庫**。
 
-本程式庫本身沒有任何依賴。只有包含 SD、EthernetENC 及 ArduinoJson 的範例才需要這些程式庫。
-
-### 為開發板建置
+### 建置開發板韌體及記憶卡
 
 在本儲存庫的複本中，以 USB 連接開發板後執行：
 
 ```sh
 git clone https://github.com/gufranco/madoguchi.git
-cd Madoguchi
-arduino-cli compile --fqbn arduino:avr:uno --library . examples/SimpleWebServer
+cd madoguchi
+arduino-cli compile --fqbn arduino:renesas_uno:minima --library . examples/RestGet
 arduino-cli board list
-arduino-cli upload --fqbn arduino:avr:uno --port <port from board list> examples/SimpleWebServer
+arduino-cli upload --fqbn arduino:renesas_uno:minima --port <port from board list> examples/RestGet
+corepack enable
+pnpm install
+pnpm --filter ./examples/RestGet/SD\ Card run build
 ```
 
-如使用 Uno R4 Minima，請改用 `--fqbn arduino:renesas_uno:minima`。範例使用地址 192.168.1.177；如你的網絡使用其他地址範圍，請在範例中修改。開發板裝上 W5x00 擴充板後，`curl http://192.168.1.177/` 會回傳 Hello World 頁面。
+把 `examples/RestGet/SD Card/dist` 中的所有內容複製到一張以 FAT16、FAT32 或 exFAT 格式化的 microSD 卡的根目錄，然後插入擴充板。可以用 [`RestFormat`](examples/RestFormat/RestFormat.ino) 準備這張卡。草稿碼使用地址 192.168.1.177；如你的網絡使用其他地址範圍，請修改它。然後開啟 `http://192.168.1.177/`。
 
 ### 無需開發板試用 REST API
 
-在同一個複本中，`mado_host_server` 會在 127.0.0.1 上執行 [`RestApi`](examples/RestApi/RestApi.ino) 的應用程式碼，並使用測試簽署密鑰及密碼 `correct-horse-battery`：
+在同一個複本中，`mado_host_server` 會在 127.0.0.1 上執行 [`RestApi`](examples/RestApi/RestApi.ino) 的應用程式碼，並使用測試簽署密鑰及密碼 `correct-horse-battery`。第三個參數是代替記憶卡的資料夾：
 
 ```sh
+pnpm --filter ./examples/RestApi/SD\ Card run build
 cmake -S tests -B build
 cmake --build build --target mado_host_server
-build/mado_host_server 8080
+build/mado_host_server 8080 100000 "examples/RestApi/SD Card/dist"
 ```
 
 在另一個終端機中執行：
@@ -136,71 +137,89 @@ Location: /api/items/1
 {"id":1,"name":"lamp","value":3,"on":true}
 ```
 
-開啟 `http://127.0.0.1:8080/` 瀏覽網站，開啟 `http://127.0.0.1:8080/docs` 使用 Swagger UI。
+開啟 `http://127.0.0.1:8080/` 瀏覽網站，開啟 `http://127.0.0.1:8080/docs/` 使用 Swagger UI。開發頁面時，`pnpm --filter ./examples/RestApi/SD\ Card run dev` 會以即時重新載入的方式提供頁面，並把 `/api` 轉發至 `MADOGUCHI_BOARD` 指定的開發板，預設為 `http://madoguchi.local`。
 
 ## 支援的硬件
 
-Madoguchi 支援兩塊開發板：搭載 ATmega328P 的 Arduino Uno R3，以及搭載 Renesas RA4M1 的 Arduino Uno R4 Minima。其他開發板一概不在支援範圍內。
+Madoguchi 只支援一塊開發板：搭載 Renesas RA4M1 的 Arduino Uno R4 Minima。其他開發板一概不在支援範圍內，包括 Uno R3 及 Uno R4 WiFi。
 
 | 硬件 | 程式庫 | 用戶端類型 |
 |:---------|:--------|:------------|
 | Wiznet W5100、W5200、W5500 擴充板 | Ethernet 2.0.2 | `EthernetClient` |
 | ENC28J60 模組 | EthernetENC 2.0.5 | `EthernetClient` |
+| 擴充板上的 microSD 插槽 | SdFat 2.3.0 | `SdFs` 及 `FsFile` |
 
-伺服器以用戶端類型作為範本參數，因此任何具備 `available()`、`read()`、`read(buffer, size)`、`write(buffer, size)`、`connected()` 及 `stop()` 的類別都可以使用。
-
-本程式庫不支援 ATmega168：單是 Ethernet 2.0.2 已佔用其 14,336 位元組快閃記憶體中的 11,208 位元組。亦不支援 UNO Q，因為 arduino:zephyr 1.0.0 上的草稿碼沒有 socket API。
+伺服器以用戶端類型作為範本參數，因此任何具備 `available()`、`read()`、`read(buffer, size)`、`write(buffer, size)`、`connected()` 及 `stop()` 的類別都可以使用。SdFat 能在 FAT16、FAT32 及 exFAT 上讀取長檔名。Arduino 的 SD 程式庫只能讀取 8.3 檔名，所以 Madoguchi 使用 SdFat。`<SdFat.h>` 必須在所有 Madoguchi 標頭檔之後引入：R4 核心把 `F()` 定義為函數，而 SdFat 會以一個失去快閃記憶體類型的巨集取代它。
 
 ## 範例
 
-大小以位元組為單位，使用 arduino-cli 1.5.1、arduino:avr 1.8.8、arduino:renesas_uno 1.6.0、Ethernet 2.0.2、SD 1.3.0、EthernetENC 2.0.5 及 ArduinoJson 7.4.3 建置：
+大小以位元組為單位，在 Uno R4 Minima 上以 arduino-cli 1.5.1、arduino:renesas_uno 1.6.0、Ethernet 2.0.2 及 SdFat 2.3.0 建置。除 RestFormat 外，每個範例都有一個存放頁面的 `SD Card` 資料夾：
 
-| 範例 | 示範內容 | Uno R3 快閃記憶體，共 32,256 | Uno R3 可用 RAM，共 2,048 | R4 Minima 快閃記憶體，共 262,144 | R4 Minima 已用 RAM，共 32,768 |
-|:--------|:------|------:|------:|------:|------:|
-| [`SimpleWebServer`](examples/SimpleWebServer/SimpleWebServer.ino) | 一個頁面 | 18,864 | 1,546 | 57,796 | 4,560 |
-| [`FormAndQuery`](examples/FormAndQuery/FormAndQuery.ino) | 查詢字串及 urlencoded 表單 | 21,288 | 1,546 | 59,600 | 4,560 |
-| [`TemplatePage`](examples/TemplatePage/TemplatePage.ino) | 快閃記憶體中頁面的 `$NAME$` 標籤 | 19,524 | 1,546 | 58,380 | 4,560 |
-| [`BasicAuth`](examples/BasicAuth/BasicAuth.ino) | HTTP Basic 憑證 | 19,596 | 1,546 | 58,440 | 4,560 |
-| [`JsonApi`](examples/JsonApi/JsonApi.ino) | ArduinoJson 回應 | 25,978 | 1,494 | 62,564 | 4,564 |
-| [`EthernetENC`](examples/EthernetENC/EthernetENC.ino) | ENC28J60 模組 | 25,264 | 851 | 63,176 | 5,184 |
-| [`WebServerSD`](examples/WebServerSD/WebServerSD.ino) | SD 卡上的檔案及資料夾，附 gzip 副本 | 30,822 | 735 | 65,648 | 5,220 |
-| [`FileUpload`](examples/FileUpload/FileUpload.ino) | 以 `PUT` 上載至 SD 卡 | 31,554 | 739 | 65,648 | 5,220 |
-| [`BlinkLed`](examples/BlinkLed/BlinkLed.ino) | 由 SD 卡上的頁面控制的 LED | 31,984 | 738 | 66,108 | 5,224 |
-| [`RestGet`](examples/RestGet/RestGet.ino) | 對項目清單及單一項目的 `GET` | 24,486 | 1,395 | 61,796 | 4,712 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | 以 JSON 新增項目的 `POST` | 27,162 | 1,403 | 64,068 | 4,712 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | 取代項目的 `PUT` | 27,368 | 1,395 | 64,312 | 4,712 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 修改項目部分欄位的 `PATCH` | 27,512 | 1,395 | 64,296 | 4,712 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | 按 ID 刪除項目的 `DELETE` | 23,206 | 1,395 | 60,948 | 4,712 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | 登入及一個受保護的路由 | 容納不下 |  | 80,072 | 5,600 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD 上的檔案：列表、下載、範圍請求、附進度上載、刪除 | 容納不下 |  | 93,312 | 6,392 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | 完整 API、網站及 Swagger UI | 容納不下 |  | 104,828 | 6,088 |
+| 範例 | 示範內容 | 快閃記憶體，共 262,144 | 已用 RAM，共 32,768 |
+|:--------|:------|------:|------:|
+| [`RestGet`](examples/RestGet/RestGet.ino) | 項目清單及單一項目的 `GET` | 74,072 | 5,920 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | 以 JSON 新增項目的 `POST` | 76,340 | 5,920 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | 取代項目的 `PUT` | 76,540 | 5,920 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 修改項目部分欄位的 `PATCH` | 76,508 | 5,920 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | 按 id 刪除項目的 `DELETE` | 73,316 | 5,920 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | 登入及一個受保護的路由 | 86,920 | 6,144 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD 上的檔案：列出、下載、範圍請求、附進度的上載、刪除 | 94,040 | 6,936 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | 完整的 API、其網站、Swagger UI 及請求日誌 | 105,644 | 6,632 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 以 0x00 及 0xFF 清除並驗證，再格式化為 FAT16、FAT32 或 exFAT；只有 JSON | 71,440 | 9,936 |
 
-RestApi 及 RestAuth 需要簽署權杖、計算密碼雜湊值並載有網站，RestFiles 則載有網站及 SHA-256，因此這三個範例需要 R4 Minima。其他範例兩塊開發板均可容納。任何超出開發板預算的建置都會令 CI 失敗；如 Uno R3 上的 SimpleWebServer 為堆疊保留的 RAM 少於 1,024 位元組，CI 亦會失敗。
+除 RestFormat 外，每個範例都會從記憶卡回應 `/api/openapi.json`，並在 `/docs/` 提供 Swagger UI。建置超出開發板預算時，CI 會失敗。
+
+## SD 卡網頁項目
+
+瀏覽器載入的每個檔案都來自記憶卡。每個範例的 `SD Card` 資料夾都是一個獨立的網頁項目：語義化 HTML、嚴格模式的 TypeScript、支援淺色及深色模式的無類別 [Pico CSS](https://picocss.com/)，以及附覆蓋率的 Vitest 測試。工作區會一次過建置全部項目：
+
+```sh
+corepack enable
+pnpm install
+pnpm run check
+pnpm run test
+pnpm run build
+```
+
+| 步驟 | 工具 | 作用 |
+|:-----|:-----|:-------------|
+| 檢查 | Biome 2.6.3、TypeScript 7.0.2、html-validate 11.17.0 | 程式碼檢查及格式化、嚴格類型檢查、HTML 標準 |
+| 測試 | Vitest 5.0.5 及 happy-dom | 以模擬開發板測試每個頁面，覆蓋率閘門為 95% |
+| 建置 | Vite 8.3.5 及 `@madoguchi/kit/vite` | 把 TypeScript 打包成以 8 位十六進位雜湊值命名的檔案，壓縮 HTML，在每個能壓縮的檔案旁邊產生 `.gz` 副本，把 OpenAPI 文件複製為 `openapi.json`，並按開發板能提供的名稱檢查每個名稱 |
+| 瀏覽器 | Playwright 1.64.0 及 Chromium | 以 320 px 及 1280 px 測試建置後的每個頁面及其文件頁，開發板以路由攔截模擬：標題、計算樣式、沒有橫向捲動、主題切換、鍵盤焦點環、每個 Swagger 操作，以及空白的主控台 |
+
+第三方前端程式碼從不放在記憶卡上。Pico CSS 2.1.1 從 jsDelivr 載入，Swagger UI 5.33.2 從 unpkg 載入，各自固定至確實版本並附 Subresource Integrity 雜湊值。建置會在每個頁面寫入 Content-Security-Policy，只容許頁面自身的檔案及這些 CDN 主機。在訪客按下切換按鈕之前，主題會跟隨系統設定，所選主題會保存在瀏覽器中。
+
+共用程式碼位於 [`web/kit`](web/kit)：CDN 版本固定、主題切換、讀取 RFC 9457 問題詳情的 fetch 輔助函式、只保存在記憶體中的 Bearer 工作階段，以及 Vite 設定。
 
 ## 架構
 
 ```mermaid
 graph LR
-    subgraph 在電腦上建置時
+    subgraph Build time on a computer
         Spec[openapi.json] --> Gen[tools/madogen]
-        Site[www 資料夾] --> Gen
         Gen --> Header[generated_api.h]
+        Pages[SD Card web project] --> Vite[Vite and the kit]
+        Spec --> Vite
+        Vite --> Card[Card files and gz copies]
     end
-    subgraph 開發板
+    subgraph Board
         Client[EthernetClient] --> Server[mado::Server process]
-        Server --> Parse[請求行及標頭]
-        Parse --> Lookup[查找路由表]
-        Lookup --> App[按路由 ID 呼叫 AppT handle]
-        App --> Exchange[mado::Exchange 輸出緩衝區]
+        Server --> Lookup[Route table lookup]
+        Lookup --> App[AppT handle by route id]
+        App --> Exchange[mado::Exchange output buffer]
+        App --> SD[serve_card_file from SD]
+        SD --> Exchange
         Exchange --> Client
     end
     Header --> Lookup
-    Header --> App
+    Card --> SD
 ```
 
+- C++ 程式碼中沒有任何資源檔案。程式碼只寫出資料：JSON、RFC 9457 問題詳情及簡短的狀態訊息。
 - 緩衝區大小固定，由作為範本參數傳入的 `Limits` 類型決定。不會在堆積上配置任何記憶體。
 - 本程式庫不保存函數指標，亦不宣告虛擬函數。按路由 ID 分支的靜態 `handle` 令呼叫圖對分析工具保持可見。
-- 每個迴圈都有迭代上限，每次讀取都有逾時，整個請求亦有限期，因此緩慢的用戶端無法令草稿碼停頓。常數字串及表格透過 `F()` 及 `PROGMEM` 存放在快閃記憶體中。
+- 每個迴圈都有迭代上限，每次讀取都有逾時，整個請求亦有限期，因此緩慢的用戶端無法令草稿碼停頓。
 - 請求按 RFC 9112 的要求剖析：`HTTP/1.1` 請求必須剛好有一個 `Host`，重複的 `Content-Length` 會收到 `400`，`Transfer-Encoding` 會收到 `501`，處理常式未讀取的請求主體會在關閉連線前讀出並捨棄。
 
 程式碼以最嚴格的詮釋遵循 JPL D-60411 C 語言標準及 Power of Ten 規則，並套用至 C++。[`AGENTS.md`](AGENTS.md) 列出每條規則及其套用方式。
@@ -213,15 +232,14 @@ graph LR
 | 請求 | 將查詢參數及 urlencoded 表單欄位解碼至你提供的緩衝區 | `query_param()`、`mado::next_form_field()` |
 | 請求 | 只擷取你指定的標頭，名稱不分大小寫；在 `100 Continue` 之後分塊讀取請求主體 | `header()`、`read_body()` |
 | 請求 | 讀取停滯或請求過慢時回傳 `408`，請求行過長時回傳 `414`，標頭行過多時回傳 `431`，HTTP/1.0 及 1.1 以外的版本回傳 `505` | 自動 |
-| 請求 | 為防範 DNS 重新繫結，只接受列出的 `Host` 名稱，有沒有連接埠皆可；每個回應的狀態都會交給一個掛鈎 | `PolicyT::trusted_hosts()`、`PolicyT::on_response()` |
-| 回應 | 附原因短語的狀態行、任何標頭、針對列出來源的 CORS、重新導向，以及按 32 位元組合併的輸出 | `send_status()`、`send_header()`、`mado::send_cors_headers()`、`send_redirect()`、`mado::Reply` |
+| 請求 | 為防範 DNS 重新繫結，只接受列出的 `Host` 名稱，有沒有連接埠皆可；每個回應都會交給一個掛鈎 | `PolicyT::trusted_hosts()`、`PolicyT::on_response()` |
+| 回應 | 附原因短語的狀態行、任何標頭、針對列出來源的 CORS、重新導向，以及合併為每次最多 1,460 位元組寫入的輸出 | `send_status()`、`send_header()`、`mado::send_cors_headers()`、`send_redirect()`、`mado::Reply` |
 | 回應 | RFC 9457 問題詳情：附標題、狀態及詳情的 `application/problem+json` | `mado::send_problem()`、`mado::json_problem()` |
-| 回應 | 快閃記憶體中頁面的 `$NAME$` 標籤；附準確 `Content-Length` 的 ArduinoJson 文件 | `mado::send_template()`、`mado::send_json()` |
-| 檔案 | 傳送 SD 卡或任何可讀取的檔案，支援資料夾、gzip 副本及按副檔名決定的內容類型 | `mado::send_file()`、`mado::content_type_for()`、`mado::accepts_gzip()` |
+| 回應 | 從檔案讀取的範本中的 `$NAME$` 標籤；附準確 `Content-Length` 的 ArduinoJson 文件 | `mado::send_template()`、`mado::send_json()` |
+| 記憶卡 | 記憶卡上的頁面及檔案：`/` 對應至 `index.html`，每個檔案旁邊的 `.gz` 副本，`Vary: Accept-Encoding`，附雜湊值的名稱快取一年，其餘為 `no-cache` | `mado::serve_card_file()`、`mado::serve_card_path()` |
+| 檔案 | 按副檔名決定內容類型的檔案；以 `206` 或 `416` 回應單一位元組範圍並支援 `If-Range`，弱 ETag 及 `304`，以及下載檔案名稱 | `mado::send_file()`、`mado::FileReply`、`mado::content_type_for()` |
 | 檔案 | 解碼並檢查 URL 路徑；拒絕 `.` 及 `..` 片段、空片段、反斜線及經編碼的 NUL 位元組 | `mado::resolve_static_path()` |
-| 檔案 | 以 `206` 或 `416` 回應單一位元組範圍並支援 `If-Range`，弱 ETag 及 `304`，以及下載檔案名稱 | `mado::send_file(exchange, file, mado::FileReply)` |
-| 檔案 | 按 8.3 檔案名稱及 `Repr-Digest` 檢查上載，先寫入暫存檔再移至目標位置 | `mado::valid_short_name()`、`mado::parse_repr_digest()`、`mado::copy_file()`、`mado::replace_file()` |
-| 檔案 | 傳送快閃記憶體中經壓縮及 gzip 的檔案，附 ETag、`304 Not Modified`、`406 Not Acceptable`、Content-Security-Policy 及編譯時產生的標頭區塊 | `mado::send_asset()` |
+| 檔案 | 按長檔名及 `Repr-Digest` 檢查上載，先寫入暫存檔再移至目標位置；拒絕超過 4 GiB 的大小 | `mado::valid_card_name()`、`mado::parse_repr_digest()`、`mado::copy_file()`、`mado::replace_file()`、`mado::file_length()` |
 | 網絡 | 設有逾時的 DHCP 及固定的後備地址；只產生一次並保存在 EEPROM 的隨機 MAC | `mado::begin_network()`、`mado::load_mac()` |
 | 網絡 | 網線或晶片恢復後重新啟動；透過 mDNS 回應 `<name>.local` | `mado::NetworkWatch`、`mado::MdnsResponder` |
 | 儲存 | 每個回應一行 JSON，格式與 pino-http 相同，超過設定大小後輪替 | `mado::SdLog`、`mado::write_request_log()` |
@@ -232,16 +250,16 @@ graph LR
 | 認證 | SHA-256、HMAC-SHA256 及 Base64url | `mado::Sha256`、`mado::HmacSha256`、`mado::Base64UrlEncoder`、`mado::Base64UrlDecoder` |
 | REST | 逐個欄位讀取 JSON 請求主體，無需在 RAM 中保存文件；輸出經跳脫的 JSON 字串 | `mado::JsonReader`、`mado::json_write_string()` |
 | REST | 讀取路徑結尾的 `{id}`；固定大小的記錄表 | `mado::parse_path_id()`、`mado::SlotTable` |
-| REST | 從 OpenAPI 3.1 文件及一個網頁檔案資料夾產生 C++ 程式碼 | [`tools/madogen`](tools/madogen/cli.py) |
+| REST | 從 OpenAPI 3.1 文件產生 C++ 路由及結構描述 | [`tools/madogen`](tools/madogen/cli.py) |
 
 ## 指南
 
 ### 路由與處理函數
 
-路由是 `{path, method, id}`，路由表以路徑為 `nullptr` 的項目作結。路由按表中次序配對，因此應把具體路徑放在萬用字元之前。
+路由是 `{path, method, id}`，路由表以路徑為 `nullptr` 的項目作結。路由按表中次序配對，因此應把具體路徑放在萬用字元之前，並把記憶卡的路由 `/*` 放在最後。
 
-- `/led` 這類精確路徑只配對 `/led`。配對時會忽略查詢字串。
-- 以 `*` 結尾的路徑，例如 `/files/*`，會配對所有以 `/files/` 開頭的路徑。
+- `/api/status` 這類精確路徑只配對該路徑。配對時會忽略查詢字串。
+- 以 `*` 結尾的路徑，例如 `/api/files/*`，會配對所有以 `/api/files/` 開頭的路徑。
 - `mado::Method::kAny` 接受所有方法。`kGet` 路由亦會回應 `HEAD`，並略去主體。
 - 路徑相符但方法不符時回傳 `405`，完全沒有相符項目時回傳 `404`。
 
@@ -280,7 +298,7 @@ graph LR
 
 ### 請求標頭
 
-建立伺服器時指定所需的標頭名稱。它們的值共用一個固定大小的池，預設為 48 位元組，過長的值會被截短。`Content-Length` 及 `Expect` 一律會被讀取。
+建立伺服器時指定所需的標頭。它們的值共用一個固定的池，預設為 48 位元組，過長的值會被截短。`Content-Length` 及 `Expect` 一律會讀取。記憶卡的路由需要 `Accept-Encoding` 來選擇 gzip 副本。
 
 ```cpp
 const char kAuthorization[] PROGMEM = "Authorization";
@@ -305,32 +323,19 @@ while (mado::next_form_field(exchange, &name[0], sizeof(name), &value[0], sizeof
 }
 ```
 
-完整草稿碼見 [`FormAndQuery`](examples/FormAndQuery/FormAndQuery.ino)。
-
-### 靜態檔案與上載
+### 記憶卡上的檔案
 
 ```cpp
-#include <mado/content_type_for.h>
-#include <mado/resolve_static_path.h>
-#include <mado/send_file.h>
+#include <mado/serve_card_file.h>
 
-char path[40];
-if (!mado::resolve_static_path(exchange.path(), "", F("INDEX.HTM"), &path[0], sizeof(path))) {
-  return exchange.send_empty(mado::http::kBadRequest);
-}
-File file = SD.open(&path[0], FILE_READ);
-mado::send_file(exchange, file, file.size(), mado::content_type_for(&path[0]), false);
+const bool served = mado::serve_card_file<FILE_READ>(exchange, sd_card);
+const char kSpecPath[] PROGMEM = "/openapi.json";
+const bool spec = mado::serve_card_path<FILE_READ>(exchange, sd_card, &kSpecPath[0]);
 ```
 
-可選的第六個參數，例如 `F("max-age=300")`，會以約 70 位元組快閃記憶體的代價加上 `Cache-Control` 標頭；在 Uno R3 上完整的 ETag 支援無法與 SD 程式庫一同容納，所以 WebServerSD 及 BlinkLed 採用這種方式。
+`serve_card_file()` 會在記憶卡上解析請求路徑：企圖跳出根目錄的路徑回傳 `400`，不存在的檔案或資料夾回傳 `404`，瀏覽器接受 gzip 時傳送檔案旁邊的 `.gz` 副本。由 8 位十六進位數字加副檔名組成的名稱，例如 `9f86d081.js`，會以 `public, max-age=31536000, immutable` 快取；其他檔案一律為 `no-cache`。`serve_card_path()` 提供一個固定檔案，`/api/openapi.json` 就是這樣回傳 `/openapi.json` 的。
 
-如要支援範圍請求、條件式請求及下載，請傳入 `mado::FileReply`，當中包括大小、類型、gzip 旗標、ETag、下載檔案名稱及 `Cache-Control` 值。`mado::file_etag()` 會根據檔案名稱、大小及一個版本號產生弱 ETag，草稿碼會在每次寫入及開機時改變該版本號，因此被同樣大小的檔案取代後會得到新的標籤。附 `If-Range` 的 `Range` 請求會得到整個檔案，因為弱標籤無法證明各部分屬於同一版本。
-
-由於 SD 程式庫只接受 8.3 格式的檔案名稱，[`WebServerSD`](examples/WebServerSD/WebServerSD.ino) 把預先壓縮的副本放在 `/GZ` 之下。[`FileUpload`](examples/FileUpload/FileUpload.ino) 將 `PUT /upload/NAME` 儲存至記憶卡：
-
-```sh
-curl --upload-file index.htm http://192.168.1.177/upload/index.htm
-```
+處理下載、範圍請求及條件請求時，把載有大小、類型、gzip 旗標、ETag、下載檔案名稱及 `Cache-Control` 值的 `mado::FileReply` 傳給 `mado::send_file()`。`mado::file_etag()` 以檔案名稱、大小及一個版本號產生弱 ETag，草稿碼會在每次寫入及啟動時更改該版本號，因此即使以相同大小的檔案替換，也會得到新的標籤。附 `If-Range` 的 `Range` 會得到整個檔案，因為弱標籤無法證明各部分屬於同一版本。[`RestFiles`](examples/RestFiles/RestFiles.ino) 用上了以上全部功能。
 
 ### Basic 認證
 
@@ -350,7 +355,10 @@ if (!mado::check_basic_auth(exchange.header(F("Authorization")), F("YWRtaW46Y2hh
 
 ### 範本
 
+範本是記憶卡上附 `$NAME$` 標籤的檔案，程式碼會在傳送檔案的同時填入標籤：
+
 ```cpp
+#include <mado/FileSource.h>
 #include <mado/send_template.h>
 
 struct PageTags {
@@ -363,10 +371,12 @@ struct PageTags {
   }
 };
 
-mado::send_template<WebExchange, PageTags>(exchange, F("<p>Reading: $TEMP$</p>"));
+FsFile page = sd_card.open("/status.html", FILE_READ);
+mado::FileSource<FsFile> source(page);
+mado::send_template<WebExchange, PageTags>(exchange, source);
 ```
 
-標籤最多 16 個字母、數字或底線。未知的標籤會按原樣傳送。
+標籤最多 16 個英文字母、數字或底線。未知的標籤會按原樣傳送，標籤前的 `$$` 會保留一個 `$`。
 
 ### 以 ArduinoJson 處理 JSON
 
@@ -416,9 +426,9 @@ mado::Server<EthernetClient, WebApp, BigLimits> web(&kRoutes[0], nullptr);
 | `kMaxPollsPerRead` | 100000 | 每次讀取的輪詢次數上限 |
 | `kRequestTimeoutMs` | 5000 | 回傳 `408` 之前，請求行及標頭的時限，請求主體另有同樣的時限 |
 | `kMaxDrainBytes` | 1024 | 關閉連線前讀出並捨棄的未讀請求主體位元組數；更長的請求主體不會讀取 |
-| `kFileChunkSize` | 32 | `send_file()` 每一步從檔案讀取的位元組數 |
+| `kFileChunkSize` | 32 | 檔案回應每一步從檔案讀取的位元組數 |
 
-第四個範本引數是策略，它列出受信任的主機，並接收每個回應的狀態。預設策略信任任何不超過 255 位元組的 `Host`，掛鈎不做任何事。
+第四個範本引數是策略，它列出受信任的主機，並接收每個回應。預設策略信任任何不超過 255 位元組的 `Host`，掛鈎不做任何事。
 
 ```cpp
 struct BoardPolicy {
@@ -468,23 +478,49 @@ curl -s -H "Authorization: Bearer $TOKEN" http://madoguchi.local/api/log | jq -c
 
 ## 以 OpenAPI 及 JWT 建構的 REST API
 
-[`RestApi`](examples/RestApi/RestApi.ino) 是一個適用於裝有 W5x00 擴充板的 Uno R4 Minima 的完整認證 API：
+[`RestApi`](examples/RestApi/RestApi.ino) 是一個使用 W5x00 擴充板的完整認證 API：
 
 | 路徑 | 提供內容 |
 |:-----|:-------|
-| `/` | 登入後可列出、新增、切換及刪除項目的頁面 |
-| `/docs` | 開發板自身 API 的 Swagger UI |
-| `GET /api/openapi.json` | OpenAPI 3.1 文件 |
+| `/` | 登入後可列出、新增、切換及刪除項目的頁面，來自記憶卡 |
+| `/docs/` | 開發板自身 API 的 Swagger UI，來自記憶卡 |
+| `GET /api/openapi.json` | OpenAPI 3.1 文件，來自記憶卡 |
 | `POST /api/auth/login` | 為有效的用戶名稱及密碼簽發 Bearer 權杖 |
 | `GET /api/items`、`GET /api/items/{id}` | 項目，公開 |
 | `POST /api/items`、`PUT`、`PATCH`、`DELETE /api/items/{id}` | 修改，需要 Bearer 權杖 |
 | `GET /api/log`、`DELETE /api/log` | JSON 行格式的請求日誌，可用 `Range` 讀取結尾，以及清除日誌，需要 Bearer 權杖 |
 
-[`RestAuth`](examples/RestAuth/RestAuth.ino) 示範登入及一個受保護的路由。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino) 及 [`RestDelete`](examples/RestDelete/RestDelete.ino) 各自示範一種不需認證的方法。[`RestFiles`](examples/RestFiles/RestFiles.ino) 可列出、下載、附進度列上載及刪除 SD 卡上的檔案；它不設認證，所以只應在可信的網絡中使用。它們都把應用程式碼放在草稿碼旁的標頭檔中，因此主機測試執行的正是開發板執行的程式碼。
+[`RestAuth`](examples/RestAuth/RestAuth.ino) 示範登入及一個受保護的路由。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino) 及 [`RestDelete`](examples/RestDelete/RestDelete.ino) 各自示範一種不需認證的方法。[`RestFiles`](examples/RestFiles/RestFiles.ino) 可列出、下載、附進度列上載及刪除 SD 卡上的檔案；它不設認證，所以只應在可信的網絡中使用。它們都把應用程式碼放在草稿碼旁的標頭檔中，因此主機測試執行的正是開發板執行的程式碼；沒有記憶卡時，它們會回傳附問題文件的 `503`。
+
+### 清除及格式化記憶卡
+
+[`RestFormat`](examples/RestFormat/RestFormat.ino) 為其他所有範例準備記憶卡。它只回應 JSON，沒有頁面亦沒有登入，所以只應在可信的網絡中使用。它會清除記憶卡上的全部內容。
+
+| 路由 | 作用 |
+|:------|:-----|
+| `GET /api/card` | 以 MiB 為單位的容量、類型（`SDSC`、`SDHC` 或 `SDXC`），以及格式化會寫入的檔案系統 |
+| `POST /api/card/format` | 開始清除；請求主體要重複容量，例如 `{"capacity_mib":30436}`，令發給一張卡的請求不會清除另一張卡；回傳附 `Location` 的 `202`，清除進行中回傳 `409`，容量不符回傳 `422` |
+| `GET /api/card/format` | 目前階段、其百分比，以及說明失敗原因的詳情 |
+
+階段依次為 `fill-zero`、`check-zero`、`fill-one`、`check-one`、`format`、`mount` 及 `done`，或 `failed`。開發板向每個扇區寫入 0x00 並逐一讀回，然後以 0xFF 再做一次；每次 `loop()` 只處理數個扇區，因此 API 一直可以回應。之後以 SdFat 的格式化工具按容量選擇檔案系統進行格式化，並掛載以確認結果：
+
+| 扇區數 | 檔案系統 | 記憶卡 |
+|:--------|:------------|:-----|
+| 少於 4,194,304，最多 2 GiB | FAT16 | SDSC |
+| 最多 67,108,864，32 GiB | FAT32 | SDHC |
+| 更多 | exFAT | SDXC |
+
+清除會對整張記憶卡各寫入兩次、讀取兩次，因此所需時間隨記憶卡的容量及 SPI 速度增加。格式化及掛載期間，開發板會停頓數秒。
+
+```sh
+curl -s http://192.168.1.177/api/card
+curl -s -H 'Content-Type: application/json' -d '{"capacity_mib":30436}' http://192.168.1.177/api/card/format
+curl -s http://192.168.1.177/api/card/format
+```
 
 ### 產生 API 程式碼
 
-每個 REST 草稿碼都有一個 `openapi.json`，RestApi 另有一個載有 HTML、CSS 及 JavaScript 的 `www` 資料夾。[`tools/madogen`](tools/madogen/cli.py) 會把它們轉換為 `generated_api.h`。這個檔案已提交至儲存庫，因此 Arduino IDE 無需安裝 Python 即可建置草稿碼。產生器只使用 Python 標準程式庫。
+每個 REST 草稿碼都有一個 `openapi.json`。[`tools/madogen`](tools/madogen/cli.py) 會把它轉換為 `generated_api.h`。這個檔案已提交至儲存庫，因此 Arduino IDE 無需安裝 Python 即可建置草稿碼。產生器只使用 Python 標準程式庫。
 
 ```sh
 python3 -m tools.madogen generate examples/RestApi
@@ -493,27 +529,26 @@ python3 -m tools.madogen check examples/RestApi
 
 `generate` 會寫出：
 
-- 由每個 `operationId` 產生的路由 ID，以及由 `paths` 產生的路由表；
+- 由每個 `operationId` 產生的路由 ID、由 `paths` 產生的路由表、`/api/openapi.json` 的路由，以及最後一條供記憶卡使用的路由 `/*`；
 - 由每個操作的 `security` 產生的 `route_needs_token()`；
 - 讀取路徑結尾 `{id}` 的 `route_path_id()`；
 - 為 `components.schemas` 中每個結構描述產生結構體及欄位讀取器，並檢查每個 `maxLength`、`minimum` 及 `maximum`；回應使用的結構描述及設定了 `x-mado-writer: true` 的結構描述亦會得到 JSON 寫入器；
 - `read_<schema>_body()`，它檢查 `Content-Type` 及長度、讀取請求主體，並在 `mado::Problem` 中指出第一個欠缺的必要屬性；以及每個按 id 進行的 `GET` 對應的 `<operation>_url()`；
-- `www` 中的每個檔案，經壓縮及 gzip，附完整的標頭區塊及 ETag，並為每個 HTML 頁面產生 Content-Security-Policy；HTML 頁面以外的檔案會按內容雜湊重新命名，並以 `immutable` 快取一年，HTML 頁面則保留原名，於 `documentMaxAge` 秒後重新驗證；
-- OpenAPI 文件本身，於 `/api/openapi.json` 提供。
+- `send_card()`，它從記憶卡提供規格文件及其他所有路徑，沒有記憶卡時回傳 `503`。
 
-當 `generated_api.h` 與來源不再一致，或 `arduino_secrets.h` 載有真正的密鑰時，`check` 會失敗。CI 會對全部八個 REST 範例執行它。
+當 `generated_api.h` 與來源不再一致，或 `arduino_secrets.h` 載有真正的密鑰時，`check` 會失敗。CI 會對全部九個範例執行它。
 
 產生器接受 OpenAPI 3.1 的一個子集，並以 JSON 指標指出任何超出範圍的內容：
 
 - 路徑以 `/api/` 開頭，只有最後一個片段可以是參數；
 - 請求主體為參照組件結構描述的 `application/json`，或 `application/octet-stream`；
 - `in: header` 參數會成為擷取的請求標頭；
-- 可選的頂層 `x-mado-limits` 可把 `outputBufferSize` 設為 8 至 1,460，`fileChunkSize` 最多設為 1,024，`documentMaxAge` 最多設為 86,400 秒；
+- 可選的頂層 `x-mado-limits` 可把 `outputBufferSize` 設為 8 至 1,460，`fileChunkSize` 最多設為 1,024；
 - 結構描述是附 `additionalProperties: false` 的扁平物件，包含附 `maxLength` 的字串、附 `minimum` 及 `maximum` 的整數，以及布林值；
 - security 為 `[]` 或 `[{"bearerAuth": []}]`，其中 `bearerAuth` 是 HTTP Bearer JWT 方案；
 - 最多 31 個操作。
 
-頁面須把腳本及樣式放在檔案中。內嵌腳本、`style` 屬性或 `on...` 處理常式會被政策阻擋，因此會中止產生。來自其他主機的腳本或樣式表需要 `integrity` 雜湊值，可用 `python3 -m tools.madogen sri FILE` 輸出。
+`python3 -m tools.madogen sri FILE` 會輸出檔案的 Subresource Integrity 雜湊值，用於在工具套件中固定新的 CDN 檔案。
 
 ### 登入
 
@@ -529,25 +564,27 @@ python3 -m tools.madogen secrets examples/RestApi --user admin
 - 權杖的有效期為 15 分鐘的運作時間，開發板重新啟動後即失效，因為每次啟動都會遞增 EEPROM 中的工作階段計數器。
 - 連續五次登入失敗會鎖定登入 15 分鐘，並回傳附 `Retry-After` 的 `429`。
 - Argon2id 及 bcrypt 所需的 RAM 超出開發板容量，因此密碼使用 PBKDF2。請調整 `--iterations`，令每次登入約需一秒。
+- 頁面只在記憶體中保存權杖，從不寫入瀏覽器儲存空間，因此重新載入頁面即會登出。
 
-`/docs` 透過 Subresource Integrity 從 unpkg.com 載入 Swagger UI 5.33.2，因此瀏覽器開啟該頁面時需要連接互聯網。其他頁面及 API 均可離線運作。
+頁面從公共 CDN 載入 Pico CSS 及 Swagger UI，因此瀏覽器需要連接互聯網才能顯示樣式及 `/docs/`。API 本身可離線運作。
 
-產生的 `Limits` 把標頭池擴大至 240 位元組，足以在 `Accept-Encoding`、`If-None-Match` 及 `Content-Type` 之外再容納一個 Bearer 權杖。超過 256 位元組的請求主體會收到 `413`，每個 API 錯誤都附有 `application/problem+json` 主體，例如 `{"title":"Unprocessable Content","status":422,"detail":"missing required property: on"}`。靜態檔案只以 gzip 格式儲存，不接受 gzip 的用戶端會收到 `406`。
+產生的 `Limits` 把標頭池擴大至 240 位元組，足以在 `Accept-Encoding`、`If-None-Match` 及 `Content-Type` 之外再容納一個 Bearer 權杖。超過 256 位元組的請求主體會收到 `413`，每個 API 錯誤都附有 `application/problem+json` 主體，例如 `{"title":"Unprocessable Content","status":422,"detail":"missing required property: on"}`。
 
 ## 開發
 
-主機測試使用 CMake 及 googletest，配合一個小型 Arduino 墊片及一個模擬用戶端。
+主機測試使用 CMake 及 googletest，配合一個小型 Arduino 墊片、一個模擬用戶端、一張模擬 SD 卡，以及供格式化範例使用的模擬扇區裝置；模擬卡與 FAT 一樣，配對檔名時不分大小寫。
 
 | 測試組 | 指令 | 涵蓋範圍 |
 |:------|:--------|:-------|
-| 程式庫及範例 | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,142 個測試：RFC 9112 一致性表、剖析、路由、回應、檔案、範圍請求、網絡輔助函式、SD 日誌、加密、權杖、REST 範例的應用程式碼，以及每個模糊測試語料庫的重播 |
+| 程式庫及範例 | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,182 個測試：RFC 9112 一致性表、剖析、路由、回應、記憶卡上的檔案、範圍請求、網絡輔助函式、SD 日誌、加密、權杖、範例的應用程式碼，以及每個模糊測試語料庫的重播 |
 | 覆蓋率 | `gcovr build --root . --filter src/ --merge-lines --txt` | `src/` 的行及函數覆蓋率，CI 的下限為 95% |
-| 產生器及閘門 | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen` 及其壓縮器、斷言密度閘門、大小閘門及吞吐量工具的 113 個測試 |
-| 頁面腳本 | `node --test tests/web/*.test.mjs` | RestApi 網站、其日誌檢視、RestFiles 頁面及 Swagger UI 載入器的 12 個測試 |
+| 產生器及閘門 | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen`、斷言密度閘門、大小閘門及吞吐量工具的 91 個測試 |
+| 頁面 | `pnpm run check && pnpm run test && pnpm run build` | Biome、TypeScript、html-validate、106 個附 95% 覆蓋率閘門的 Vitest 測試，以及每張記憶卡的建置 |
+| 瀏覽器 | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | 32 個 Playwright 測試：以 320 px 及桌面闊度測試每個頁面及文件頁 |
 | 吞吐量 | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | 量度開發板的下載及上載速度，以 JSON 輸出 |
 | 產生的程式碼 | `python3 -m tools.madogen check examples/Rest*` | `generated_api.h` 與來源一致，且沒有提交真正的密鑰 |
 | 模糊測試 | `cmake -S tests -B fuzz -DMADO_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build fuzz && fuzz/mado_fuzz_request tests/fuzz/corpus/request` | 啟用 AddressSanitizer 及 UBSan 的 libFuzzer，涵蓋伺服器、RestApi 及 RestFiles 應用程式、JSON 讀取器及文字解碼器 |
-| 大小預算 | `python3 tools/size_gate.py --fqbn arduino:avr:uno --min-free-ram 1024 examples/SimpleWebServer` | 按開發板預算檢查快閃記憶體及 RAM，編譯器警告為零 |
+| 大小預算 | `python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima examples/RestApi` | 按開發板預算檢查快閃記憶體及 RAM，編譯器警告為零 |
 
 CI 亦會執行 clang-format、clang-tidy、附 `--enable=all` 的 cppcheck 2.22.0、斷言密度閘門及嚴格模式的 arduino-lint，並且不容許任何警告。確實指令見 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，編碼規則見 [`AGENTS.md`](AGENTS.md)。
 

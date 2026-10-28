@@ -4,16 +4,19 @@
 #include <EEPROM.h>
 #include <Ethernet.h>
 #include <Madoguchi.h>
-#include <SD.h>
 #include <SPI.h>
 
 #include "AuthApp.h"
 #include "arduino_secrets.h"
 #include "generated_api.h"
 
-using WebApp = AuthApp<EthernetClient, secrets::Provisioned, SDClass, FILE_READ, FILE_WRITE>;
+#include <SdFat.h>
+
+using WebApp = AuthApp<EthernetClient, secrets::Provisioned, SdFs, FILE_READ, FILE_WRITE>;
 
 constexpr uint8_t kSdChipSelect = 4U;
+
+SdFs sd_card;
 
 constexpr int kSessionAddress = 0;
 constexpr uint32_t kLastSession = 0x7FFFFFFFU;
@@ -33,7 +36,7 @@ uint32_t next_session() {
 }
 
 void setup() {
-  WebApp::begin(next_session(), SD, kSdChipSelect);
+  WebApp::begin(next_session(), sd_card, kSdChipSelect);
   Ethernet.begin(mac_address, IPAddress(192, 168, 1, 177));
   ethernet_server.begin();
 }

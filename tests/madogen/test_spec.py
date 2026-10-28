@@ -279,15 +279,14 @@ def test_collects_header_parameters_and_skips_other_locations() -> None:
 def test_reads_buffer_limits_and_defaults_the_rest() -> None:
     # Arrange
     spec = document()
-    spec["x-mado-limits"] = {"outputBufferSize": 512, "documentMaxAge": 60}
+    spec["x-mado-limits"] = {"outputBufferSize": 512}
 
     # Act
     api = parse_api(spec)
 
     # Assert
     assert (api.buffers.output, api.buffers.file_chunk) == (512, 32)
-    assert api.buffers.document_max_age == 60
-    assert parse_api(document()).buffers.document_max_age == 300
+    assert parse_api(document()).buffers.output == 32
 
 
 @pytest.mark.parametrize(
@@ -297,8 +296,7 @@ def test_reads_buffer_limits_and_defaults_the_rest() -> None:
         ({"outputBufferSize": 1461}, "/x-mado-limits/outputBufferSize"),
         ({"fileChunkSize": 0}, "/x-mado-limits/fileChunkSize"),
         ({"fileChunkSize": 1025}, "/x-mado-limits/fileChunkSize"),
-        ({"documentMaxAge": -1}, "/x-mado-limits/documentMaxAge"),
-        ({"documentMaxAge": 86401}, "/x-mado-limits/documentMaxAge"),
+        ({"documentMaxAge": 60}, "/x-mado-limits/documentMaxAge"),
         ({"keepAlive": 1}, "/x-mado-limits/keepAlive"),
     ],
 )
@@ -370,3 +368,28 @@ def test_rejects_a_writer_mark_that_is_not_a_boolean() -> None:
 
     # Assert
     assert error.pointer == "/components/schemas/Item/x-mado-writer"
+
+
+def test_serves_the_card_unless_the_document_turns_it_off() -> None:
+    # Arrange
+    spec = document()
+    spec["x-mado-card"] = False
+
+    # Act
+    api = parse_api(spec)
+
+    # Assert
+    assert not api.card
+    assert parse_api(document()).card
+
+
+def test_rejects_a_card_switch_that_is_not_a_boolean() -> None:
+    # Arrange
+    spec = document()
+    spec["x-mado-card"] = "no"
+
+    # Act
+    error = error_for(spec)
+
+    # Assert
+    assert error.pointer == "/x-mado-card"

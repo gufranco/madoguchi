@@ -2,7 +2,7 @@
 
 <h1>Madoguchi</h1>
 
-<strong>Uno R3とUno R4 Minima向けの、ヒープを使わない小さなHTTPサーバーです。R4ではJWTで保護されたREST APIを提供します。</strong>
+<strong>Arduino Uno R4 Minima向けの、ヒープを使わないHTTPサーバー。ページはSDカードから配信し、OpenAPIから生成したJWT認証付きREST APIを提供します。</strong>
 
 <br>
 <br>
@@ -17,6 +17,7 @@
 <p align="center">
   <a href="#クイックスタート">クイックスタート</a> |
   <a href="#サンプル">サンプル</a> |
+  <a href="#sdカードのwebプロジェクト">SDカードのページ</a> |
   <a href="#openapiとjwtによるrest-api">REST API</a> |
   <a href="#開発">開発</a> |
   <a href="CHANGELOG.md">変更履歴</a>
@@ -24,35 +25,32 @@
 
 ---
 
-Madoguchiは、Uno R3のATmega328P上でEthernetライブラリやSDライブラリと共存し、ヒープを一切確保しません。Uno R4 Minimaでは、1つのOpenAPIドキュメントから生成した完全なREST APIを提供します。JWTによるログイン、JSONボディ、すべてのHTTPメソッド、`/`のサイト、`/docs`のSwagger UIを含みます。CIは17個のサンプルすべてを対象ボード向けにビルドし、ボードのフラッシュまたはRAMの上限を超えたビルドを失敗させます。また、プッシュとプルリクエストのたびに、ホストテスト1,142件、ツールテスト113件、ページスクリプトテスト12件を実行し、パーサーをファズテストします。
+Madoguchiは、W5x00またはENC28J60のシールドとSDカードを載せたUno R4 Minimaで動作し、ヒープを一切確保しません。C++のコードにはHTML、CSS、スクリプト、画像を一切含めません。すべてのページはカード上にあり、サンプルごとに独立したWebプロジェクトから作られます。TypeScriptとクラス不要のPico CSSで書かれ、Viteがカードのファイルとgzipのコピーにビルドします。ボードは1つのOpenAPIドキュメントから生成したREST APIに応答し、JWTによるログイン、JSONボディ、すべてのHTTPメソッドを扱います。CIは、プッシュとプルリクエストのたびに9個のサンプルすべてをビルドしてボードのフラッシュまたはRAMの上限を超えたビルドを失敗させ、ホストテスト1,182件、ツールテスト91件、ページテスト106件、ブラウザーテスト32件を実行し、すべてのカードをビルドし、パーサーをファズテストします。
 
 名前の由来は、依頼を受け取って答えを返す「窓口」です。
 
 ## 使い方
 
-ハンドラーは、ルートIDで分岐する静的関数です。以下は[`SimpleWebServer`](examples/SimpleWebServer/SimpleWebServer.ino)の中核部分で、Uno R3では18,640バイトのフラッシュを使います。
+ハンドラーは、ルートIDで分岐する静的関数です。ページはカードから、APIはコードから返します。スケッチの中心部分は次のとおりです。
 
 ```cpp
 struct WebApp {
   static bool handle(WebExchange& exchange, const uint8_t route) {
-    const bool known = route == kIndex;
-    if (!known) {
-      return exchange.send_empty(404U);
+    switch (route) {
+      case kStatus: return send_status_json(exchange);
+      default: return mado::serve_card_file<FILE_READ>(exchange, sd_card);
     }
-    const bool status = exchange.send_status(200U);
-    const bool type = exchange.send_content_type(F("text/html"));
-    const bool ended = exchange.end_headers();
-    const size_t written = exchange.print(F("<html><body><h1>Hello World!</h1></body></html>\n"));
-    return status && type && ended && (written > 0U);
   }
 };
 
-const char kIndexPath[] PROGMEM = "/";
+const char kStatusPath[] PROGMEM = "/api/status";
+const char kCardPath[] PROGMEM = "/*";
 const mado::Route kRoutes[] PROGMEM = {
-    {&kIndexPath[0], mado::Method::kGet, kIndex},
+    {&kStatusPath[0], mado::Method::kGet, kStatus},
+    {&kCardPath[0], mado::Method::kGet, kCard},
     {nullptr, mado::Method::kAny, 0U},
 };
-mado::Server<EthernetClient, WebApp> web(kRoutes, nullptr);
+mado::Server<EthernetClient, WebApp> web(&kRoutes[0], &kHeaderNames[0]);
 
 void loop() {
   EthernetClient client = ethernet_server.available();
@@ -63,7 +61,7 @@ void loop() {
 }
 ```
 
-`process()`は、待機中のリクエストがなければすぐに戻ります。リクエストがあれば読み取り、一致したルートのIDで`WebApp::handle`を呼び出し、接続を閉じます。
+`process()`は、待機中のリクエストがなければすぐに戻ります。リクエストがあれば読み取り、一致したルートのIDで`WebApp::handle`を呼び出して接続を閉じます。`serve_card_file()`は`/`を`/index.html`に対応させ、ブラウザーがgzipを受け付けるときはファイルの隣にある`.gz`のコピーを優先し、ハッシュ名のファイルを1年間キャッシュさせます。
 
 ## クイックスタート
 
@@ -72,46 +70,49 @@ void loop() {
 | ツール | バージョン | 用途 |
 |:-----|:--------|:-----------|
 | [arduino-cli](https://arduino.github.io/arduino-cli/)またはArduino IDE | CIはarduino-cli 1.5.1を使用 | ボード向けのビルド |
-| `arduino:avr`または`arduino:renesas_uno`コア | 1.8.8または1.6.0 | Uno R3またはUno R4 Minima |
-| Ethernetライブラリ | 2.0.2 | EthernetENC以外のすべてのサンプル |
+| `arduino:renesas_uno`コア | 1.6.0 | Uno R4 Minima |
+| EthernetライブラリとSdFatライブラリ | Ethernet 2.0.2、SdFat 2.3.0 | すべてのサンプル |
+| Node.jsとpnpm | Node 24、pnpm 12.15.0 | カード用ページのビルド |
 | CMakeとC++コンパイラー | CMake 3.24以降 | コンピューター上でのREST APIの実行 |
 
 ### インストール
 
-MadoguchiはArduino Library Managerに登録されていません。このリポジトリからインストールしてください。
+MadoguchiはArduinoライブラリマネージャーには登録されていません。このリポジトリからインストールしてください。
 
 ```sh
 arduino-cli config set library.enable_unsafe_install true
 arduino-cli lib install --git-url https://github.com/gufranco/madoguchi.git
-arduino-cli lib install Ethernet@2.0.2
+arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 ```
 
 Arduino IDEでは、リポジトリをZIPでダウンロードし、**スケッチ > ライブラリをインクルード > .ZIP形式のライブラリをインストール**を使います。
 
-ライブラリ自体には依存関係がありません。SD、EthernetENC、ArduinoJsonは、それらをインクルードするサンプルでのみ必要です。
+### ボードとカードのビルド
 
-### ボード向けのビルド
-
-このリポジトリをクローンし、ボードをUSBで接続した状態で実行します。
+このリポジトリをクローンし、ボードをUSBで接続した状態で次を実行します。
 
 ```sh
 git clone https://github.com/gufranco/madoguchi.git
-cd Madoguchi
-arduino-cli compile --fqbn arduino:avr:uno --library . examples/SimpleWebServer
+cd madoguchi
+arduino-cli compile --fqbn arduino:renesas_uno:minima --library . examples/RestGet
 arduino-cli board list
-arduino-cli upload --fqbn arduino:avr:uno --port <port from board list> examples/SimpleWebServer
+arduino-cli upload --fqbn arduino:renesas_uno:minima --port <port from board list> examples/RestGet
+corepack enable
+pnpm install
+pnpm --filter ./examples/RestGet/SD\ Card run build
 ```
 
-Uno R4 Minimaでは`--fqbn arduino:renesas_uno:minima`を使います。スケッチはアドレス192.168.1.177を使うため、ネットワークのアドレス範囲が異なる場合はスケッチ内で変更してください。ボードにW5x00シールドを載せていれば、`curl http://192.168.1.177/`でHello Worldページが返ります。
+`examples/RestGet/SD Card/dist`の中身をすべて、FAT16、FAT32、exFATのいずれかでフォーマットしたmicroSDカードのルートにコピーし、シールドに挿します。カードの準備には[`RestFormat`](examples/RestFormat/RestFormat.ino)を使えます。スケッチはアドレス192.168.1.177を使います。ネットワークのアドレス範囲が異なる場合は変更してください。その後`http://192.168.1.177/`を開きます。
 
 ### ボードなしでREST APIを試す
 
-同じクローンで、`mado_host_server`が[`RestApi`](examples/RestApi/RestApi.ino)のアプリケーションコードを127.0.0.1上で実行します。テスト用の署名鍵とパスワード`correct-horse-battery`を使います。
+同じクローンで`mado_host_server`を使うと、[`RestApi`](examples/RestApi/RestApi.ino)のアプリケーションコードを127.0.0.1上で、テスト用の署名鍵とパスワード`correct-horse-battery`で実行できます。3つ目の引数は、カードの代わりになるフォルダーです。
 
 ```sh
+pnpm --filter ./examples/RestApi/SD\ Card run build
 cmake -S tests -B build
 cmake --build build --target mado_host_server
-build/mado_host_server 8080
+build/mado_host_server 8080 100000 "examples/RestApi/SD Card/dist"
 ```
 
 別のターミナルで次を実行します。
@@ -136,116 +137,133 @@ Location: /api/items/1
 {"id":1,"name":"lamp","value":3,"on":true}
 ```
 
-サイトは`http://127.0.0.1:8080/`、Swagger UIは`http://127.0.0.1:8080/docs`で開けます。
+サイトは`http://127.0.0.1:8080/`、Swagger UIは`http://127.0.0.1:8080/docs/`で開けます。ページを作業するときは、`pnpm --filter ./examples/RestApi/SD\ Card run dev`がライブリロード付きでページを配信し、`/api`を`MADOGUCHI_BOARD`で指定したボードへ送ります。既定値は`http://madoguchi.local`です。
 
 ## 対応ハードウェア
 
-Madoguchiが対応するボードは、ATmega328Pを搭載したArduino Uno R3と、Renesas RA4M1を搭載したArduino Uno R4 Minimaの2つです。それ以外のボードは対象外です。
+Madoguchiが対応するボードは、Renesas RA4M1を載せたArduino Uno R4 Minimaの1つだけです。Uno R3やUno R4 WiFiを含め、ほかのボードは対象外です。
 
 | ハードウェア | ライブラリ | クライアント型 |
 |:---------|:--------|:------------|
 | Wiznet W5100、W5200、W5500シールド | Ethernet 2.0.2 | `EthernetClient` |
 | ENC28J60モジュール | EthernetENC 2.0.5 | `EthernetClient` |
+| シールドのmicroSDスロット | SdFat 2.3.0 | `SdFs`と`FsFile` |
 
-サーバーはクライアント型をテンプレート引数に取るため、`available()`、`read()`、`read(buffer, size)`、`write(buffer, size)`、`connected()`、`stop()`を持つクラスであれば動作します。
-
-ATmega168には対応していません。Ethernet 2.0.2だけで、14,336バイトのフラッシュのうち11,208バイトを使うためです。UNO Qにも対応していません。arduino:zephyr 1.0.0上のスケッチにはソケットAPIがないためです。
+サーバーはクライアント型を引数に取るテンプレートなので、`available()`、`read()`、`read(buffer, size)`、`write(buffer, size)`、`connected()`、`stop()`を持つクラスであれば動作します。SdFatはFAT16、FAT32、exFATで長いファイル名を読めます。ArduinoのSDライブラリは8.3形式の名前しか読めないため、MadoguchiはSdFatを使います。`<SdFat.h>`はMadoguchiのすべてのヘッダーより後にインクルードしてください。R4のコアは`F()`を関数として定義しており、SdFatはそれをフラッシュの型を失うマクロで置き換えるためです。
 
 ## サンプル
 
-サイズの単位はバイトです。arduino-cli 1.5.1、arduino:avr 1.8.8、arduino:renesas_uno 1.6.0、Ethernet 2.0.2、SD 1.3.0、EthernetENC 2.0.5、ArduinoJson 7.4.3でビルドしました。
+サイズの単位はバイトで、Uno R4 Minima上でarduino-cli 1.5.1、arduino:renesas_uno 1.6.0、Ethernet 2.0.2、SdFat 2.3.0を使ってビルドした値です。RestFormat以外の各サンプルには、ページを収めた`SD Card`フォルダーがあります。
 
-| サンプル | 内容 | Uno R3フラッシュ、32,256中 | Uno R3空きRAM、2,048中 | R4 Minimaフラッシュ、262,144中 | R4 Minima使用RAM、32,768中 |
-|:--------|:------|------:|------:|------:|------:|
-| [`SimpleWebServer`](examples/SimpleWebServer/SimpleWebServer.ino) | 1ページ | 18,864 | 1,546 | 57,796 | 4,560 |
-| [`FormAndQuery`](examples/FormAndQuery/FormAndQuery.ino) | クエリ文字列とurlencodedフォーム | 21,288 | 1,546 | 59,600 | 4,560 |
-| [`TemplatePage`](examples/TemplatePage/TemplatePage.ino) | フラッシュ上のページの`$NAME$`タグ | 19,524 | 1,546 | 58,380 | 4,560 |
-| [`BasicAuth`](examples/BasicAuth/BasicAuth.ino) | HTTP Basic認証 | 19,596 | 1,546 | 58,440 | 4,560 |
-| [`JsonApi`](examples/JsonApi/JsonApi.ino) | ArduinoJsonによるレスポンス | 25,978 | 1,494 | 62,564 | 4,564 |
-| [`EthernetENC`](examples/EthernetENC/EthernetENC.ino) | ENC28J60モジュール | 25,264 | 851 | 63,176 | 5,184 |
-| [`WebServerSD`](examples/WebServerSD/WebServerSD.ino) | SD上のファイルとフォルダー、gzip版付き | 30,822 | 735 | 65,648 | 5,220 |
-| [`FileUpload`](examples/FileUpload/FileUpload.ino) | SDへの`PUT`アップロード | 31,554 | 739 | 65,648 | 5,220 |
-| [`BlinkLed`](examples/BlinkLed/BlinkLed.ino) | SD上のページから切り替えるLED | 31,984 | 738 | 66,108 | 5,224 |
-| [`RestGet`](examples/RestGet/RestGet.ino) | アイテム一覧と1件の`GET` | 24,486 | 1,395 | 61,796 | 4,712 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | JSONによる新規アイテムの`POST` | 27,162 | 1,403 | 64,068 | 4,712 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | アイテムを置き換える`PUT` | 27,368 | 1,395 | 64,312 | 4,712 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | アイテムの一部のフィールドを変更する`PATCH` | 27,512 | 1,395 | 64,296 | 4,712 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | IDによるアイテムの`DELETE` | 23,206 | 1,395 | 60,948 | 4,712 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | ログインと保護されたルート1つ | 収まりません |  | 80,072 | 5,600 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD上のファイルの一覧、ダウンロード、範囲指定、進捗付きアップロード、削除 | 収まりません |  | 93,312 | 6,392 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | API全体、サイト、Swagger UI | 収まりません |  | 104,828 | 6,088 |
+| サンプル | 内容 | フラッシュ（262,144中） | 使用RAM（32,768中） |
+|:--------|:------|------:|------:|
+| [`RestGet`](examples/RestGet/RestGet.ino) | 項目一覧と項目1件の`GET` | 74,072 | 5,920 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | JSONによる新しい項目の`POST` | 76,340 | 5,920 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | 項目を置き換える`PUT` | 76,540 | 5,920 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | 項目の一部のフィールドを変更する`PATCH` | 76,508 | 5,920 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | IDによる項目の`DELETE` | 73,316 | 5,920 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | ログインと保護されたルート1つ | 86,920 | 6,144 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | SD上のファイル。一覧、ダウンロード、範囲指定、進捗付きアップロード、削除 | 94,040 | 6,936 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | 完全なAPI、そのサイト、Swagger UI、リクエストログ | 105,644 | 6,632 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | 0x00と0xFFで消去して検証し、FAT16、FAT32、exFATでフォーマット。JSONのみ | 71,440 | 9,936 |
 
-RestApiとRestAuthはトークンへの署名、パスワードのハッシュ化、サイトの保持を行い、RestFilesはサイトとSHA-256を持つため、この3つにはR4 Minimaが必要です。それ以外のサンプルはどちらのボードにも収まります。CIは、いずれかのボードの上限を超えたビルドを失敗させます。また、Uno R3上のSimpleWebServerがスタック用に1,024バイト以上のRAMを残さない場合も失敗させます。
+RestFormat以外のどのサンプルも`/api/openapi.json`にカードから応答し、`/docs/`でSwagger UIを配信します。CIは、ボードの上限を超えたビルドを失敗させます。
+
+## SDカードのWebプロジェクト
+
+ブラウザーが読み込むファイルはすべてカードから届きます。各サンプルの`SD Card`フォルダーは独立したWebプロジェクトで、セマンティックなHTML、strictモードのTypeScript、ライトモードとダークモードに対応したクラス不要の[Pico CSS](https://picocss.com/)、カバレッジ付きのVitestテストで構成されます。ワークスペースですべてをビルドします。
+
+```sh
+corepack enable
+pnpm install
+pnpm run check
+pnpm run test
+pnpm run build
+```
+
+| 段階 | ツール | 内容 |
+|:-----|:-----|:-------------|
+| チェック | Biome 2.6.3、TypeScript 7.0.2、html-validate 11.17.0 | リントと整形、strictな型チェック、HTMLの標準準拠 |
+| テスト | Vitest 5.0.5とhappy-dom | 各ページを模擬ボードに対して検証、カバレッジ95パーセントのゲート |
+| ビルド | Vite 8.3.5と`@madoguchi/kit/vite` | TypeScriptを8桁の16進ハッシュ名のファイルにまとめ、HTMLを縮小し、縮むファイルの隣に`.gz`のコピーを作り、OpenAPIドキュメントを`openapi.json`としてコピーし、すべての名前をボードが配信できるものと照合 |
+| ブラウザー | Playwright 1.64.0とChromium | ビルドした各ページとそのドキュメントページを320 pxと1280 pxで検証。ボードはルートの横取りで模擬し、見出し、計算済みスタイル、横スクロールがないこと、テーマ切り替え、キーボードのフォーカスリング、Swaggerの全操作、空のコンソールを確認 |
+
+サードパーティーのフロントエンドコードはカードに置きません。Pico CSS 2.1.1はjsDelivrから、Swagger UI 5.33.2はunpkgから読み込み、それぞれ正確なバージョンとSubresource Integrityハッシュで固定しています。ビルドは各ページにContent-Security-Policyを書き込み、ページ自身のファイルとこれらのCDNホストだけを許可します。テーマは訪問者が切り替えボタンを押すまでシステム設定に従い、選んだテーマはブラウザーに保存されます。
+
+共通のコードは[`web/kit`](web/kit)にあります。CDNの固定値、テーマ切り替え、RFC 9457のproblemを読むfetchヘルパー、メモリーだけに保持するBearerセッション、Viteの設定です。
 
 ## アーキテクチャ
 
 ```mermaid
 graph LR
-    subgraph コンピューター上のビルド時
+    subgraph Build time on a computer
         Spec[openapi.json] --> Gen[tools/madogen]
-        Site[wwwフォルダー] --> Gen
         Gen --> Header[generated_api.h]
+        Pages[SD Card web project] --> Vite[Vite and the kit]
+        Spec --> Vite
+        Vite --> Card[Card files and gz copies]
     end
-    subgraph ボード
+    subgraph Board
         Client[EthernetClient] --> Server[mado::Server process]
-        Server --> Parse[リクエスト行とヘッダー]
-        Parse --> Lookup[ルートテーブルの検索]
-        Lookup --> App[ルートIDによるAppT handle]
-        App --> Exchange[mado::Exchange出力バッファー]
+        Server --> Lookup[Route table lookup]
+        Lookup --> App[AppT handle by route id]
+        App --> Exchange[mado::Exchange output buffer]
+        App --> SD[serve_card_file from SD]
+        SD --> Exchange
         Exchange --> Client
     end
     Header --> Lookup
-    Header --> App
+    Card --> SD
 ```
 
-- バッファーは固定長で、テンプレート引数として渡す`Limits`型でサイズが決まります。ヒープには何も確保しません。
-- ライブラリは関数ポインターを持たず、仮想関数も宣言しません。ルートIDで分岐する静的な`handle`により、呼び出しグラフが解析ツールから見える状態を保ちます。
-- すべてのループに反復回数の上限があり、すべての読み取りにタイムアウトがあり、リクエスト全体にも期限があるため、遅いクライアントがスケッチを止めることはありません。定数文字列とテーブルは`F()`と`PROGMEM`でフラッシュに置かれます。
-- リクエストはRFC 9112のとおりに解析します。`HTTP/1.1`のリクエストには`Host`がちょうど1つ必要で、`Content-Length`が重複すると`400`、`Transfer-Encoding`には`501`を返し、ハンドラーが読まなかったボディは接続を閉じる前に読み捨てます。
+- C++のコードにはアセットを置きません。コードが書くのはデータだけです。JSON、RFC 9457のproblem、短い状態メッセージです。
+- バッファーは固定長で、テンプレート引数として渡す`Limits`型でサイズを決めます。ヒープには何も確保しません。
+- ライブラリは関数ポインターを持たず、仮想関数も宣言しません。ルートIDで分岐する静的な`handle`により、呼び出しグラフが解析ツールから見えます。
+- すべてのループに反復回数の上限があり、すべての読み取りにタイムアウトがあり、リクエスト全体に期限があるため、遅いクライアントがスケッチを止めることはありません。
+- リクエストはRFC 9112に従って解析します。`HTTP/1.1`のリクエストには`Host`がちょうど1つ必要で、`Content-Length`の重複は`400`、`Transfer-Encoding`は`501`になり、ハンドラーが読み残したボディは接続を閉じる前に読み捨てます。
 
-コードは、JPL D-60411のC言語標準とPower of Tenのルールに、最も厳しい解釈でC++向けに合わせて従っています。各ルールとその適用方法は[`AGENTS.md`](AGENTS.md)にあります。
+コードはJPL D-60411のC言語標準とPower of Tenのルールを最も厳格に解釈し、C++に適用しています。各ルールとその適用方法は[`AGENTS.md`](AGENTS.md)にあります。
 
 ## 含まれる機能
 
 | 分野 | 機能 | API |
 |:-----|:--------|:----|
-| リクエスト | パスとメソッドによるルーティング、プレフィックス用の末尾`*`、`Allow`ヘッダー付きの`405` | `mado::Route {path, method, id}` |
-| リクエスト | クエリパラメーターとurlencodedフォームのフィールドを、用意したバッファーにデコード | `query_param()`、`mado::next_form_field()` |
-| リクエスト | 指定したヘッダーだけを大文字小文字を区別せずに取得、`100 Continue`の後にボディをブロック単位で読み取り | `header()`、`read_body()` |
-| リクエスト | 読み取りが止まるかリクエストが遅いと`408`、リクエスト行が長すぎると`414`、ヘッダー行が多すぎると`431`、HTTP/1.0と1.1以外のバージョンには`505` | 自動 |
-| リクエスト | DNSリバインディング対策として、列挙した`Host`名だけをポートの有無にかかわらず受け付け、レスポンスごとにステータスを渡すフック | `PolicyT::trusted_hosts()`、`PolicyT::on_response()` |
-| レスポンス | 理由句付きのステータス行、任意のヘッダー、列挙したオリジン向けのCORS、リダイレクト、32バイト単位にまとめた出力 | `send_status()`、`send_header()`、`mado::send_cors_headers()`、`send_redirect()`、`mado::Reply` |
-| レスポンス | RFC 9457のProblem Details。タイトル、ステータス、詳細を持つ`application/problem+json` | `mado::send_problem()`、`mado::json_problem()` |
-| レスポンス | フラッシュに置いたページの`$NAME$`タグ、正確な`Content-Length`付きのArduinoJsonドキュメント | `mado::send_template()`、`mado::send_json()` |
-| ファイル | SDや任意の読み取り可能なファイルの配信、フォルダー、gzip版、拡張子ごとのContent-Type | `mado::send_file()`、`mado::content_type_for()`、`mado::accepts_gzip()` |
-| ファイル | URLパスをデコードして検査し、`.`と`..`のセグメント、空のセグメント、バックスラッシュ、エンコードされたNULバイトを拒否 | `mado::resolve_static_path()` |
-| ファイル | 1つのバイト範囲を`206`または`416`で返し、`If-Range`、弱いETagと`304`、ダウンロード名に対応 | `mado::send_file(exchange, file, mado::FileReply)` |
-| ファイル | アップロードを8.3形式の名前と`Repr-Digest`で検査し、一時ファイルに書いてから所定の場所へ移動 | `mado::valid_short_name()`、`mado::parse_repr_digest()`、`mado::copy_file()`、`mado::replace_file()` |
-| ファイル | フラッシュ上の縮小・gzip化したファイルを、ETag、`304 Not Modified`、`406 Not Acceptable`、Content-Security-Policy、コンパイル時に組み立てたヘッダーブロック付きで配信 | `mado::send_asset()` |
+| リクエスト | パスとメソッドによるルーティング。末尾の`*`で前方一致、`405`には`Allow`ヘッダーを付与 | `mado::Route {path, method, id}` |
+| リクエスト | クエリパラメーターとurlencodedフォームのフィールドを、指定したバッファーにデコード | `query_param()`、`mado::next_form_field()` |
+| リクエスト | 指定したヘッダーだけを大文字と小文字を区別せずに取得。ボディは`100 Continue`の後にブロック単位で読み取り | `header()`、`read_body()` |
+| リクエスト | 読み取りの停滞や遅いリクエストには`408`、長すぎるリクエスト行には`414`、多すぎるヘッダー行には`431`、HTTP/1.0と1.1以外のバージョンには`505` | 自動 |
+| リクエスト | DNSリバインディング対策として、列挙した`Host`名だけをポートの有無にかかわらず受け付け、レスポンスごとに呼ばれるフック | `PolicyT::trusted_hosts()`、`PolicyT::on_response()` |
+| レスポンス | 理由句付きのステータス行、任意のヘッダー、列挙したオリジンへのCORS、リダイレクト、最大1,460バイトの書き込みにまとめる出力 | `send_status()`、`send_header()`、`mado::send_cors_headers()`、`send_redirect()`、`mado::Reply` |
+| レスポンス | RFC 9457のproblem details。タイトル、ステータス、詳細を含む`application/problem+json` | `mado::send_problem()`、`mado::json_problem()` |
+| レスポンス | ファイルから読むテンプレートの`$NAME$`タグ。`Content-Length`が正確なArduinoJsonドキュメント | `mado::send_template()`、`mado::send_json()` |
+| カード | カード上のページとファイル。`/`を`index.html`へ、各ファイルの隣の`.gz`コピー、`Vary: Accept-Encoding`、ハッシュ名には1年のキャッシュ、それ以外には`no-cache` | `mado::serve_card_file()`、`mado::serve_card_path()` |
+| ファイル | 拡張子ごとのContent-Typeを付けたファイル。1つのバイト範囲を`206`または`416`と`If-Range`で返し、弱いETagと`304`、ダウンロード名に対応 | `mado::send_file()`、`mado::FileReply`、`mado::content_type_for()` |
+| ファイル | URLパスをデコードして検査。`.`と`..`のセグメント、空のセグメント、バックスラッシュ、エンコードされたNULバイトを拒否 | `mado::resolve_static_path()` |
+| ファイル | アップロードを長い名前と`Repr-Digest`で検査し、一時ファイルに書いてから所定の場所へ移動。4 GiBを超えるサイズは拒否 | `mado::valid_card_name()`、`mado::parse_repr_digest()`、`mado::copy_file()`、`mado::replace_file()`、`mado::file_length()` |
 | ネットワーク | タイムアウト付きのDHCPと固定のフォールバックアドレス。一度だけ作ってEEPROMに保存するランダムなMAC | `mado::begin_network()`、`mado::load_mac()` |
 | ネットワーク | ケーブルやチップが戻ったときの再起動。mDNSで応答する`<name>.local` | `mado::NetworkWatch`、`mado::MdnsResponder` |
 | ストレージ | レスポンスごとにpino-httpと同じ形のJSONを1行。指定サイズを超えるとローテーション | `mado::SdLog`、`mado::write_request_log()` |
 | ストレージ | 小さなカウンターをSD上のテキストファイルに、固定のレコードをEEPROMに保存 | `mado::read_count_file()`、`mado::write_count_file()`、`mado::EepromTable` |
-| 認証 | HTTP Basic認証の資格情報を定数時間で検査 | `mado::check_basic_auth()` |
-| 認証 | HS256のJSON Web Tokenの発行と検証、PBKDF2-HMAC-SHA256によるパスワードハッシュ | `mado::issue_token()`、`mado::verify_bearer()`、`mado::pbkdf2_sha256()` |
+| 認証 | 定数時間で照合するHTTP Basic認証 | `mado::check_basic_auth()` |
+| 認証 | HS256のJSON Web Tokenの発行と検証。PBKDF2-HMAC-SHA256によるパスワードハッシュ | `mado::issue_token()`、`mado::verify_bearer()`、`mado::pbkdf2_sha256()` |
 | 認証 | 5回失敗するとログインを15分間ロック | `mado::LoginGuard` |
 | 認証 | SHA-256、HMAC-SHA256、Base64url | `mado::Sha256`、`mado::HmacSha256`、`mado::Base64UrlEncoder`、`mado::Base64UrlDecoder` |
-| REST | JSONリクエストボディをRAM上にドキュメントを置かずにフィールド単位で読み取り、JSON文字列をエスケープして出力 | `mado::JsonReader`、`mado::json_write_string()` |
-| REST | パス末尾の`{id}`の読み取り、レコードの固定テーブル | `mado::parse_path_id()`、`mado::SlotTable` |
-| REST | OpenAPI 3.1ドキュメントとWebファイルのフォルダーからC++を生成 | [`tools/madogen`](tools/madogen/cli.py) |
+| REST | JSONのリクエストボディをRAMにドキュメントを置かずにフィールド単位で読み取り。エスケープしたJSON文字列 | `mado::JsonReader`、`mado::json_write_string()` |
+| REST | パス末尾の`{id}`の読み取り。レコードの固定テーブル | `mado::parse_path_id()`、`mado::SlotTable` |
+| REST | OpenAPI 3.1ドキュメントから生成するC++のルートとスキーマ | [`tools/madogen`](tools/madogen/cli.py) |
 
 ## ガイド
 
 ### ルートとハンドラー
 
-ルートは`{path, method, id}`で、テーブルはパスが`nullptr`のエントリーで終わります。ルートはテーブルの順に照合されるため、具体的なパスをワイルドカードより前に置いてください。
+ルートは`{path, method, id}`で、テーブルはパスが`nullptr`のエントリーで終わります。ルートはテーブルの順に照合されるため、具体的なパスをワイルドカードより前に置き、カードのルート`/*`を最後に置きます。
 
-- `/led`のような完全なパスは`/led`にだけ一致します。照合ではクエリ文字列を無視します。
-- `/files/*`のように`*`で終わるパスは、`/files/`で始まるすべてのパスに一致します。
-- `mado::Method::kAny`はすべてのメソッドを受け付けます。`kGet`のルートは`HEAD`にも応答し、ボディは省かれます。
-- パスは一致してもメソッドが違う場合は`405`、どれにも一致しない場合は`404`になります。
+- `/api/status`のような完全なパスは、そのパスにだけ一致します。照合ではクエリ文字列を無視します。
+- `/api/files/*`のように`*`で終わるパスは、`/api/files/`で始まるすべてのパスに一致します。
+- `mado::Method::kAny`はすべてのメソッドを受け付けます。`kGet`のルートは`HEAD`にも応答し、ボディを省きます。
+- パスは一致してもメソッドが違う場合は`405`、何も一致しない場合は`404`になります。
 
-`handle`は、レスポンスが完了して接続を閉じてよい場合に`true`を返します。後で`exchange.client()`を通じて更新を送り続けるなど、接続を開いたままにする場合は`false`を返します。W5100のソケットは4つなので、開いたままの接続は少なくしてください。
+`handle`は、レスポンスが完了して接続を閉じてよいときに`true`を返します。たとえば後で`exchange.client()`経由で更新を送り続けるために接続を開いたままにするには`false`を返します。W5100のソケットは4つなので、開いたままの接続は少なくしてください。
 
 ### Exchange
 
@@ -280,7 +298,7 @@ graph LR
 
 ### リクエストヘッダー
 
-必要なヘッダー名はサーバーの作成時に指定します。値は固定長のプールを共有し、既定では48バイトで、それより長い値は切り詰められます。`Content-Length`と`Expect`は常に読み取られます。
+必要なヘッダーはサーバーの作成時に指定します。値は固定のプールを共有し、既定では48バイトで、長い値は切り詰められます。`Content-Length`と`Expect`は常に読み取ります。カードのルートには、gzipのコピーを選ぶために`Accept-Encoding`が必要です。
 
 ```cpp
 const char kAuthorization[] PROGMEM = "Authorization";
@@ -305,32 +323,19 @@ while (mado::next_form_field(exchange, &name[0], sizeof(name), &value[0], sizeof
 }
 ```
 
-スケッチ全体は[`FormAndQuery`](examples/FormAndQuery/FormAndQuery.ino)にあります。
-
-### 静的ファイルとアップロード
+### カード上のファイル
 
 ```cpp
-#include <mado/content_type_for.h>
-#include <mado/resolve_static_path.h>
-#include <mado/send_file.h>
+#include <mado/serve_card_file.h>
 
-char path[40];
-if (!mado::resolve_static_path(exchange.path(), "", F("INDEX.HTM"), &path[0], sizeof(path))) {
-  return exchange.send_empty(mado::http::kBadRequest);
-}
-File file = SD.open(&path[0], FILE_READ);
-mado::send_file(exchange, file, file.size(), mado::content_type_for(&path[0]), false);
+const bool served = mado::serve_card_file<FILE_READ>(exchange, sd_card);
+const char kSpecPath[] PROGMEM = "/openapi.json";
+const bool spec = mado::serve_card_path<FILE_READ>(exchange, sd_card, &kSpecPath[0]);
 ```
 
-省略可能な6番目の引数、たとえば`F("max-age=300")`を渡すと、約70バイトのフラッシュで`Cache-Control`ヘッダーを付けます。Uno R3ではSDと並べるとETagへの完全な対応が収まらないため、WebServerSDとBlinkLedはこちらを使います。
+`serve_card_file()`はリクエストのパスをカード上で解決し、外へ出ようとするパスには`400`、存在しないファイルやフォルダーには`404`を返し、ブラウザーがgzipを受け付けるときはファイルの隣の`.gz`のコピーを送ります。`9f86d081.js`のように16進8桁と拡張子からなる名前は`public, max-age=31536000, immutable`でキャッシュさせ、それ以外のファイルには`no-cache`を付けます。`serve_card_path()`は1つの決まったファイルを配信し、`/api/openapi.json`はこれで`/openapi.json`を返します。
 
-範囲指定、条件付きリクエスト、ダウンロードには、サイズ、タイプ、gzipフラグ、ETag、ダウンロード名、`Cache-Control`の値を入れた`mado::FileReply`を渡します。`mado::file_etag()`は、名前、サイズ、スケッチが書き込みのたびと起動時に変えるバージョンから弱いETagを作ります。そのため、同じサイズのファイルで置き換えても新しいタグになります。`If-Range`付きの`Range`にはファイル全体を返します。弱いタグでは、部分同士が同じ版であることを証明できないためです。
-
-SDライブラリは8.3形式の名前しか受け付けないため、[`WebServerSD`](examples/WebServerSD/WebServerSD.ino)は事前圧縮したファイルを`/GZ`の下に置きます。[`FileUpload`](examples/FileUpload/FileUpload.ino)は`PUT /upload/NAME`をカードに保存します。
-
-```sh
-curl --upload-file index.htm http://192.168.1.177/upload/index.htm
-```
+ダウンロード、範囲指定、条件付きリクエストには、サイズ、タイプ、gzipフラグ、ETag、ダウンロード名、`Cache-Control`の値を入れた`mado::FileReply`を`mado::send_file()`に渡します。`mado::file_etag()`は、名前、サイズ、スケッチが書き込みのたびと起動時に変えるバージョンから弱いETagを作ります。そのため、同じサイズのファイルで置き換えても新しいタグになります。`If-Range`付きの`Range`にはファイル全体を返します。弱いタグでは、部分同士が同じ版であることを証明できないためです。[`RestFiles`](examples/RestFiles/RestFiles.ino)はこれらをすべて使います。
 
 ### Basic認証
 
@@ -350,7 +355,10 @@ if (!mado::check_basic_auth(exchange.header(F("Authorization")), F("YWRtaW46Y2hh
 
 ### テンプレート
 
+テンプレートは`$NAME$`タグを含むカード上のファイルで、コードがファイルを送りながらタグを埋めます。
+
 ```cpp
+#include <mado/FileSource.h>
 #include <mado/send_template.h>
 
 struct PageTags {
@@ -363,10 +371,12 @@ struct PageTags {
   }
 };
 
-mado::send_template<WebExchange, PageTags>(exchange, F("<p>Reading: $TEMP$</p>"));
+FsFile page = sd_card.open("/status.html", FILE_READ);
+mado::FileSource<FsFile> source(page);
+mado::send_template<WebExchange, PageTags>(exchange, source);
 ```
 
-タグは最大16文字の英字、数字、アンダースコアです。不明なタグは書かれたまま送信されます。
+タグは最大16文字の英字、数字、アンダースコアです。不明なタグは書かれたまま送信され、タグの前の`$$`は`$`を1つ残します。
 
 ### ArduinoJsonによるJSON
 
@@ -416,9 +426,9 @@ mado::Server<EthernetClient, WebApp, BigLimits> web(&kRoutes[0], nullptr);
 | `kMaxPollsPerRead` | 100000 | 1回の読み取りあたりのポーリング回数の上限 |
 | `kRequestTimeoutMs` | 5000 | `408`を返すまでの、リクエスト行とヘッダー、さらにボディそれぞれの制限時間 |
 | `kMaxDrainBytes` | 1024 | 接続を閉じる前に読み捨てる未読ボディのバイト数。これより長いボディは読みません |
-| `kFileChunkSize` | 32 | `send_file()`が1回にファイルから読むバイト数 |
+| `kFileChunkSize` | 32 | ファイルレスポンスの1ステップでファイルから読むバイト数 |
 
-4つ目のテンプレート引数であるポリシーは、信頼するホストを列挙し、各レスポンスのステータスを受け取ります。デフォルトは255バイトまでの任意の`Host`を信頼し、フックは何もしません。
+4つ目のテンプレート引数であるポリシーは、信頼するホストを列挙し、各レスポンスを受け取ります。デフォルトは255バイトまでの任意の`Host`を信頼し、フックは何もしません。
 
 ```cpp
 struct BoardPolicy {
@@ -468,86 +478,113 @@ curl -s -H "Authorization: Bearer $TOKEN" http://madoguchi.local/api/log | jq -c
 
 ## OpenAPIとJWTによるREST API
 
-[`RestApi`](examples/RestApi/RestApi.ino)は、W5x00シールドを載せたUno R4 Minima向けの、認証付きの完全なAPIです。
+[`RestApi`](examples/RestApi/RestApi.ino)は、W5x00シールドで動く認証付きの完全なAPIです。
 
-| パス | 提供する内容 |
+| パス | 提供するもの |
 |:-----|:-------|
-| `/` | サインインして、アイテムの一覧、追加、切り替え、削除を行うページ |
-| `/docs` | ボード自身のAPIのSwagger UI |
-| `GET /api/openapi.json` | OpenAPI 3.1ドキュメント |
+| `/` | サインインして項目の一覧、追加、切り替え、削除を行うページ。カードから配信 |
+| `/docs/` | ボード自身のAPIのSwagger UI。カードから配信 |
+| `GET /api/openapi.json` | OpenAPI 3.1ドキュメント。カードから配信 |
 | `POST /api/auth/login` | 正しいユーザー名とパスワードに対するBearerトークン |
-| `GET /api/items`、`GET /api/items/{id}` | アイテム、公開 |
+| `GET /api/items`、`GET /api/items/{id}` | 項目。公開 |
 | `POST /api/items`、`PUT`、`PATCH`、`DELETE /api/items/{id}` | 変更、Bearerトークンが必要 |
 | `GET /api/log`、`DELETE /api/log` | JSON行のリクエストログ、末尾を読むための`Range`、ログの消去。Bearerトークンが必要 |
 
-[`RestAuth`](examples/RestAuth/RestAuth.ino)は、ログインと保護されたルート1つを示します。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino)、[`RestDelete`](examples/RestDelete/RestDelete.ino)は、それぞれ認証なしで1つのメソッドを示します。[`RestFiles`](examples/RestFiles/RestFiles.ino)は、SDカード上のファイルの一覧、ダウンロード、進捗バー付きのアップロード、削除を行います。認証がないため、信頼できるネットワークで使ってください。どれもアプリケーションコードをスケッチの隣のヘッダーに置いているため、ホストテストはボードが実行するのと同じコードを実行します。
+[`RestAuth`](examples/RestAuth/RestAuth.ino)は、ログインと保護されたルート1つを示します。[`RestGet`](examples/RestGet/RestGet.ino)、[`RestPost`](examples/RestPost/RestPost.ino)、[`RestPut`](examples/RestPut/RestPut.ino)、[`RestPatch`](examples/RestPatch/RestPatch.ino)、[`RestDelete`](examples/RestDelete/RestDelete.ino)は、それぞれ認証なしで1つのメソッドを示します。[`RestFiles`](examples/RestFiles/RestFiles.ino)は、SDカード上のファイルの一覧、ダウンロード、進捗バー付きのアップロード、削除を行います。認証がないため、信頼できるネットワークで使ってください。どれもアプリケーションコードをスケッチの隣のヘッダーに置いているため、ホストテストはボードが実行するのと同じコードを実行します。カードがないときは、problemドキュメント付きの`503`を返します。
+
+### カードの消去とフォーマット
+
+[`RestFormat`](examples/RestFormat/RestFormat.ino)は、ほかのすべてのサンプル用にカードを準備します。応答はJSONだけで、ページもログインもないため、信頼できるネットワークで使ってください。カード上のものはすべて消えます。
+
+| ルート | 動作 |
+|:------|:-----|
+| `GET /api/card` | MiB単位の容量、種類（`SDSC`、`SDHC`、`SDXC`）、フォーマットで書くファイルシステム |
+| `POST /api/card/format` | 消去を始めます。ボディは容量を繰り返し、`{"capacity_mib":30436}`のように送るため、あるカード向けのリクエストが別のカードを消すことはありません。`Location`付きの`202`、消去中は`409`、容量が違えば`422` |
+| `GET /api/card/format` | フェーズ、その進捗率、失敗したときはその内容 |
+
+フェーズは`fill-zero`、`check-zero`、`fill-one`、`check-one`、`format`、`mount`、`done`、または`failed`です。ボードはすべてのセクターに0x00を書いてすべて読み戻し、次に0xFFで同じことをします。`loop()`の1回ごとに数セクターずつ進めるため、その間もAPIは応答します。その後SdFatのフォーマッターで容量に応じたファイルシステムを書き、マウントして結果を確かめます。
+
+| セクター数 | ファイルシステム | カード |
+|:--------|:------------|:-----|
+| 4,194,304未満、2 GiBまで | FAT16 | SDSC |
+| 67,108,864まで、32 GiB | FAT32 | SDHC |
+| それ以上 | exFAT | SDXC |
+
+消去はカード全体を書き込みと読み取りで2回ずつ通すため、かかる時間はカードの容量とSPIの速度に比例します。フォーマットとマウントの間、ボードは数秒止まります。
+
+```sh
+curl -s http://192.168.1.177/api/card
+curl -s -H 'Content-Type: application/json' -d '{"capacity_mib":30436}' http://192.168.1.177/api/card/format
+curl -s http://192.168.1.177/api/card/format
+```
 
 ### APIコードの生成
 
-各RESTスケッチは`openapi.json`を持ち、RestApiはさらにHTML、CSS、JavaScriptの`www`フォルダーを持ちます。[`tools/madogen`](tools/madogen/cli.py)がこれらを`generated_api.h`に変換します。このファイルはコミットされているため、Arduino IDEはPythonなしでスケッチをビルドできます。ジェネレーターはPython標準ライブラリだけを使います。
+各RESTスケッチは`openapi.json`を持ちます。[`tools/madogen`](tools/madogen/cli.py)はそれを`generated_api.h`に変換します。このファイルはコミットされるため、Arduino IDEはPythonなしでスケッチをビルドできます。ジェネレーターはPythonの標準ライブラリだけを使います。
 
 ```sh
 python3 -m tools.madogen generate examples/RestApi
 python3 -m tools.madogen check examples/RestApi
 ```
 
-`generate`が書き出すものは次のとおりです。
+`generate`が書き出すもの：
 
-- 各`operationId`からのルートID、`paths`からのルートテーブル
-- 各オペレーションの`security`からの`route_needs_token()`
-- パス末尾の`{id}`を読み取る`route_path_id()`
+- 各`operationId`からのルートID、`paths`からのルートテーブル、`/api/openapi.json`のルート、カード用の最後のルート`/*`
+- 各操作の`security`から作る`route_needs_token()`
+- パス末尾の`{id}`を読む`route_path_id()`
 - `components.schemas`の各スキーマに対する構造体とフィールドリーダー。各`maxLength`、`minimum`、`maximum`を検査します。JSONライターは、レスポンスで使うスキーマと`x-mado-writer: true`を指定したスキーマに作られます
-- `Content-Type`と長さを検査してボディを読み、最初に欠けている必須プロパティを`mado::Problem`で示す`read_<schema>_body()`と、IDによる`GET`ごとの`<operation>_url()`
-- `www`内のすべてのファイルを縮小・gzip化したもの、そのヘッダーブロック全体とETag、各HTMLページのContent-Security-Policy。HTMLページ以外のファイルは内容のハッシュに基づく名前に変わり、`immutable`として1年間キャッシュされます。HTMLページは名前を保ち、`documentMaxAge`秒後に再検証されます
-- `/api/openapi.json`で配信するOpenAPIドキュメント自体
+- `Content-Type`と長さを確認してボディを読み、最初に欠けている必須プロパティを`mado::Problem`で示す`read_<schema>_body()`と、IDによる`GET`ごとの`<operation>_url()`
+- 仕様とそれ以外のすべてのパスをカードから配信し、カードがないときは`503`を返す`send_card()`
 
-`check`は、`generated_api.h`がソースと一致しなくなった場合、または`arduino_secrets.h`に本物の鍵が入っている場合に失敗します。CIは8つのRESTサンプルすべてで実行します。
+`check`は、`generated_api.h`がソースと一致しなくなった場合、または`arduino_secrets.h`に本物の鍵が入っている場合に失敗します。CIは9つのサンプルすべてで実行します。
 
-ジェネレーターはOpenAPI 3.1のサブセットを受け付け、その範囲外のものはJSONポインターで示します。
+ジェネレーターはOpenAPI 3.1のサブセットを受け付け、範囲外のものはJSONポインターで示します。
 
 - パスは`/api/`で始まり、パラメーターにできるのは最後のセグメントだけです
+- リクエストボディはコンポーネントのスキーマを参照する`application/json`か、`application/octet-stream`です
 - `in: header`のパラメーターは、取得するリクエストヘッダーになります
-- 省略可能な最上位の`x-mado-limits`で、`outputBufferSize`を8から1,460、`fileChunkSize`を1,024まで、`documentMaxAge`を86,400秒まで設定できます
-- リクエストボディは`application/json`でコンポーネントのスキーマを参照するか、`application/octet-stream`です
+- 省略可能な最上位の`x-mado-limits`で、`outputBufferSize`を8から1,460、`fileChunkSize`を1,024まで設定できます
 - スキーマは`additionalProperties: false`のフラットなオブジェクトで、`maxLength`付きの文字列、`minimum`と`maximum`付きの整数、真偽値を持ちます
-- securityは`[]`または`[{"bearerAuth": []}]`で、`bearerAuth`はHTTP BearerのJWT方式です
-- オペレーションは最大31個です
+- securityは`[]`または`[{"bearerAuth": []}]`で、`bearerAuth`はHTTP Bearer JWT方式です
+- 操作は最大31個です
 
-ページはスクリプトとスタイルをファイルに分けておきます。インラインスクリプト、`style`属性、`on...`ハンドラーがあると、ポリシーでブロックされるため生成は止まります。別のホストのスクリプトやスタイルシートには`integrity`ハッシュが必要で、`python3 -m tools.madogen sri FILE`で出力できます。
+`python3 -m tools.madogen sri FILE`はファイルのSubresource Integrityハッシュを表示します。キットで新しいCDNファイルを固定するときに使います。
 
 ### サインイン
 
-コミットされている`arduino_secrets.h`の鍵はすべてゼロで、置き換えるまではログインが`503`を返し、どのトークンも受け付けません。本物のシークレットはボードごとに一度作成します。
+コミットされている`arduino_secrets.h`の鍵はすべてゼロで、置き換えるまではログインが`503`を返し、どのトークンも受け付けません。ボードごとに一度、本物の秘密情報を作ります。
 
 ```sh
 python3 -m tools.madogen secrets examples/RestApi --user admin
 ```
 
-12〜64文字のパスワードを尋ね、ランダムな32バイトの署名鍵、ランダムなソルト、パスワードのPBKDF2-HMAC-SHA256ハッシュを書き出します。このファイルは決してコミットしないでください。CIが実行する`check`は、本物の鍵が入っていると失敗します。
+12〜64文字のパスワードを尋ね、ランダムな32バイトの署名鍵、ランダムなソルト、パスワードのPBKDF2-HMAC-SHA256ハッシュを書き出します。このファイルは絶対にコミットしないでください。CIが実行する`check`は、本物の鍵が入っていると失敗します。
 
-- トークンはHS256のJWTです。ボードはトークンのヘッダーをバイト単位で比較するため、`alg: none`やその他のアルゴリズムは失敗します。署名は定数時間で比較します。
-- トークンの有効期間は稼働時間で15分で、ボードを再起動すると無効になります。起動のたびにEEPROM上のセッションカウンターを進めるためです。
-- ログインに5回続けて失敗すると、ログインが15分間ロックされ、`Retry-After`付きの`429`を返します。
-- Argon2idとbcryptはボードのRAMを超えるため、パスワードにはPBKDF2を使います。ログインが約1秒かかるように`--iterations`を調整してください。
+- トークンはHS256のJWTです。ボードはトークンのヘッダーをバイト単位で比較するため、`alg: none`やほかのアルゴリズムは失敗し、署名は定数時間で比較します。
+- トークンの有効期間は稼働時間で15分で、ボードを再起動すると無効になります。起動のたびにEEPROMのセッションカウンターが進むためです。
+- ログインに5回続けて失敗すると、ログインは15分間ロックされ、`Retry-After`付きの`429`を返します。
+- Argon2idやbcryptはボードのRAMでは足りないため、パスワードにはPBKDF2を使います。ログインに約1秒かかるよう`--iterations`を調整してください。
+- ページはトークンをメモリーにだけ保持し、ブラウザーのストレージには保存しないため、再読み込みするとサインアウトします。
 
-`/docs`はunpkg.comからSwagger UI 5.33.2をSubresource Integrity付きで読み込むため、そのページにはブラウザーのインターネット接続が必要です。それ以外のページとAPIはオフラインで動作します。
+ページはPico CSSとSwagger UIを公開CDNから読み込むため、スタイルと`/docs/`にはブラウザーのインターネット接続が必要です。API自体はオフラインで動作します。
 
-生成される`Limits`はヘッダープールを240バイトに広げ、`Accept-Encoding`、`If-None-Match`、`Content-Type`と並べてBearerトークンを保持できるようにします。256バイトを超えるリクエストボディには`413`を返し、APIのエラーにはすべて`{"title":"Unprocessable Content","status":422,"detail":"missing required property: on"}`のような`application/problem+json`のボディが付きます。静的ファイルはgzip形式でのみ保存され、gzipを受け付けないクライアントには`406`を返します。
+生成される`Limits`はヘッダープールを240バイトに広げ、`Accept-Encoding`、`If-None-Match`、`Content-Type`と並べてBearerトークンを保持します。256バイトを超えるリクエストボディは`413`になり、APIのエラーにはすべて`{"title":"Unprocessable Content","status":422,"detail":"missing required property: on"}`のような`application/problem+json`のボディが付きます。
 
 ## 開発
 
-ホストテストはCMakeとgoogletestを使い、小さなArduinoシムと偽のクライアントで動きます。
+ホストテストはCMakeとgoogletestを使い、小さなArduinoシム、模擬クライアント、FATと同じく大文字と小文字を区別せずに名前を照合する模擬SDカード、フォーマットのサンプル用の模擬セクターデバイスで動きます。
 
 | スイート | コマンド | 対象 |
 |:------|:--------|:-------|
-| ライブラリとサンプル | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,142件。RFC 9112適合表、解析、ルーティング、レスポンス、ファイル、範囲指定、ネットワーク補助関数、SDログ、暗号、トークン、RESTサンプルのアプリケーションコード、各ファズコーパスの再生 |
+| ライブラリとサンプル | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,182件。RFC 9112適合表、解析、ルーティング、レスポンス、カードのファイル、範囲指定、ネットワーク補助関数、SDログ、暗号、トークン、サンプルのアプリケーションコード、各ファズコーパスの再生 |
 | カバレッジ | `gcovr build --root . --filter src/ --merge-lines --txt` | `src/`の行と関数のカバレッジ。CIでは95パーセントを下限とします |
-| ジェネレーターとゲート | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen`とその縮小処理、アサーション密度ゲート、サイズゲート、スループットツールの113件 |
-| ページスクリプト | `node --test tests/web/*.test.mjs` | RestApiのサイト、そのログ表示、RestFilesのページ、Swagger UIローダーの12件 |
+| ジェネレーターとゲート | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | `madogen`、アサーション密度ゲート、サイズゲート、スループットツールの91件 |
+| ページ | `pnpm run check && pnpm run test && pnpm run build` | Biome、TypeScript、html-validate、カバレッジ95パーセントのゲート付きVitestテスト106件、すべてのカードのビルド |
+| ブラウザー | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | Playwrightテスト32件。すべてのページとドキュメントページを320 pxとデスクトップ幅で検証 |
 | スループット | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | ボードに対するダウンロードとアップロードの速度をJSONで表示 |
 | 生成コード | `python3 -m tools.madogen check examples/Rest*` | `generated_api.h`がソースと一致し、本物の鍵がコミットされていないこと |
 | ファズテスト | `cmake -S tests -B fuzz -DMADO_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build fuzz && fuzz/mado_fuzz_request tests/fuzz/corpus/request` | AddressSanitizerとUBSanを有効にしたlibFuzzerで、サーバー、RestApiとRestFilesのアプリ、JSONリーダー、テキストデコーダーを検査 |
-| サイズ上限 | `python3 tools/size_gate.py --fqbn arduino:avr:uno --min-free-ram 1024 examples/SimpleWebServer` | ボードの上限に対するフラッシュとRAM、コンパイラー警告ゼロ |
+| サイズ上限 | `python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima examples/RestApi` | ボードの上限に対するフラッシュとRAM、コンパイラー警告ゼロ |
 
 CIはさらに、clang-format、clang-tidy、`--enable=all`付きのcppcheck 2.22.0、アサーション密度ゲート、strictモードのarduino-lintを、警告ゼロを条件に実行します。正確なコマンドは[`.github/workflows/ci.yml`](.github/workflows/ci.yml)に、コーディングルールは[`AGENTS.md`](AGENTS.md)にあります。
 

@@ -2,10 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Gustavo Franco
 # SPDX-License-Identifier: MIT
 
-import gzip
 import re
 
-from .assets import Asset
 from .spec import (
     CAPTURED_HEADER_LIMIT,
     INT32_MAX,
@@ -18,8 +16,6 @@ from .spec import (
     Schema,
 )
 
-BYTES_PER_ROW = 12
-NO_ASSET = 255
 TOKEN_POOL_SIZE = 240
 PLAIN_POOL_SIZE = 96
 HEADER = (
@@ -27,15 +23,16 @@ HEADER = (
     "// SPDX-License-Identifier: MIT\n\n"
     "#ifndef GENERATED_API_H\n#define GENERATED_API_H\n\n"
     "#include <Arduino.h>\n#include <Madoguchi.h>\n#include <stdint.h>\n"
-    "#include <string.h>\n#include <mado/Asset.h>\n#include <mado/BodySource.h>\n"
+    "#include <string.h>\n#include <mado/BodySource.h>\n"
     "#include <mado/JsonReader.h>\n#include <mado/JsonStatus.h>\n#include <mado/Problem.h>\n"
     "#include <mado/check.h>\n#include <mado/http_status.h>\n#include <mado/json_body_problem.h>\n"
     "#include <mado/json_problem.h>\n#include <mado/json_write_string.h>\n"
-    "#include <mado/parse_path_id.h>\n#include <mado/send_asset.h>\n\n"
+    "#include <mado/parse_path_id.h>\n#include <mado/send_problem.h>\n"
 )
+CARD_INCLUDE = "#include <mado/serve_card_file.h>\n"
 FOOTER = "}\n\n#endif\n"
-ARRAY = re.compile(r"const uint8_t kAsset\d+\[\d+\] PROGMEM = \{([^}]*)\};")
-GZIP_LENGTH = re.compile(r"Content-Length: \d+\\r\\n")
+OPENAPI_URL = "/api/openapi.json"
+OPENAPI_CARD_PATH = "/openapi.json"
 
 
 def pascal(name: str) -> str:
@@ -58,17 +55,21 @@ def method_enum(method: str) -> str:
     return f"mado::Method::k{method.capitalize()}"
 
 
-def render_route_ids(operations: tuple[Operation, ...]) -> str:
+def render_route_ids(operations: tuple[Operation, ...], card: bool) -> str:
     names = [constant(operation.operation_id) for operation in operations]
-    body = "".join(f"  {name},\n" for name in [*names, "kStaticAsset"])
+    extra = ["kOpenApiDocument", "kCardFile"] if card else []
+    body = "".join(f"  {name},\n" for name in [*names, *extra])
     return f"enum RouteId : uint8_t {{\n{body}}};\n\n"
 
 
-def render_routes(operations: tuple[Operation, ...]) -> str:
+def render_routes(operations: tuple[Operation, ...], card: bool) -> str:
     ordered = sorted(
         operations, key=lambda operation: operation.route_pattern.endswith("*")
     )
-    patterns = list(dict.fromkeys([op.route_pattern for op in ordered] + ["/*"]))
+    edges = ([OPENAPI_URL], ["/*"]) if card else ([], [])
+    patterns = list(
+        dict.fromkeys(edges[0] + [op.route_pattern for op in ordered] + edges[1])
+    )
     paths = "".join(
         f'const char kRoutePath{index}[] PROGMEM = "{pattern}";\n'
         for index, pattern in enumerate(patterns)
@@ -78,10 +79,16 @@ def render_routes(operations: tuple[Operation, ...]) -> str:
         f"{constant(op.operation_id)}}}"
         for op in ordered
     ]
-    rows += [
-        f"{{&kRoutePath{patterns.index('/*')}[0], mado::Method::kGet, kStaticAsset}}",
-        "{nullptr, mado::Method::kAny, 0U}",
-    ]
+    if card:
+        rows = [
+            (
+                f"{{&kRoutePath{patterns.index(OPENAPI_URL)}[0], mado::Method::kGet, "
+                "kOpenApiDocument}"
+            ),
+            *rows,
+            f"{{&kRoutePath{patterns.index('/*')}[0], mado::Method::kGet, kCardFile}}",
+        ]
+    rows = [*rows, "{nullptr, mado::Method::kAny, 0U}"]
     body = "".join(f"    {row},\n" for row in rows)
     return f"{paths}\nconst mado::Route kRoutes[] PROGMEM = {{\n{body}}};\n\n"
 
@@ -138,11 +145,15 @@ def case_block(names: list[str], result: str) -> str:
     return f"{labels}      return {result};\n"
 
 
-def render_token_routes(operations: tuple[Operation, ...]) -> str:
+def last_route(operations: tuple[Operation, ...], card: bool) -> str:
+    return "kCardFile" if card else constant(operations[-1].operation_id)
+
+
+def render_token_routes(operations: tuple[Operation, ...], last: str) -> str:
     secured = [constant(op.operation_id) for op in operations if op.secured]
     return (
         "inline bool route_needs_token(const uint8_t route) {\n"
-        "  const bool known = mado::check(route <= kStaticAsset);\n"
+        f"  const bool known = mado::check(route <= {last});\n"
         "  if (!known) {\n    return true;\n  }\n"
         "  switch (route) {\n"
         f"{case_block(secured, 'true')}"
@@ -150,7 +161,7 @@ def render_token_routes(operations: tuple[Operation, ...]) -> str:
     )
 
 
-def render_path_ids(operations: tuple[Operation, ...]) -> str:
+def render_path_ids(operations: tuple[Operation, ...], last: str) -> str:
     prefixes = sorted({op.id_prefix for op in operations if op.id_prefix})
     blocks = "".join(
         case_block(
@@ -162,7 +173,7 @@ def render_path_ids(operations: tuple[Operation, ...]) -> str:
     return (
         "inline bool route_path_id(const char* const path, const uint8_t route, uint8_t& id) {\n"
         "  id = 0U;\n"
-        "  const bool valid = mado::check(path != nullptr) && mado::check(route <= kStaticAsset);\n"
+        f"  const bool valid = mado::check(path != nullptr) && mado::check(route <= {last});\n"
         "  if (!valid) {\n    return false;\n  }\n"
         "  switch (route) {\n"
         f"{blocks}"
@@ -402,142 +413,47 @@ def render_schema(schema: Schema, operations: tuple[Operation, ...]) -> str:
     )
 
 
-def byte_rows(data: bytes) -> str:
-    rows = [
-        data[start : start + BYTES_PER_ROW]
-        for start in range(0, len(data), BYTES_PER_ROW)
-    ]
-    return ",\n".join(
-        "    " + ", ".join(f"0x{value:02x}" for value in row) for row in rows
-    )
-
-
-def render_asset_data(assets: tuple[Asset, ...]) -> str:
-    return "".join(
-        f"const uint8_t kAsset{index}[{len(asset.data)}] PROGMEM = {{\n{byte_rows(asset.data)}}};\n\n"
-        for index, asset in enumerate(assets)
-    )
-
-
-def render_find_asset(assets: tuple[Asset, ...]) -> str:
-    branches = "".join(
-        f'  if (strcmp_P(path, PSTR("{path}")) == 0) {{\n    return {index}U;\n  }}\n'
-        for index, asset in enumerate(assets)
-        for path in asset.url_paths
-    )
+def render_send_card() -> str:
     return (
-        f"constexpr uint8_t kNoAsset = {NO_ASSET}U;\n\n"
-        "inline uint8_t find_asset(const char* const path) {\n"
-        "  const bool valid = mado::check(path != nullptr) && mado::check(path[0] == '/');\n"
-        "  if (!valid) {\n    return kNoAsset;\n  }\n"
-        f"{branches}"
-        "  return kNoAsset;\n}\n\n"
+        f'const char kOpenApiCardPath[] PROGMEM = "{OPENAPI_CARD_PATH}";\n\n'
+        "template <uint16_t kReadMode, typename ExchangeT, typename SdT>\n"
+        "bool send_card(ExchangeT& exchange, SdT* const card, const uint8_t route) {\n"
+        "  const bool served = mado::check(route == kOpenApiDocument) ||\n"
+        "                      mado::check(route == kCardFile);\n"
+        "  if (!served) {\n    return exchange.send_empty(mado::http::kNotFound);\n  }\n"
+        "  if (card == nullptr) {\n"
+        "    return mado::send_problem(\n"
+        "        exchange, mado::Problem{mado::http::kServiceUnavailable,\n"
+        '                                F("the SD card is not available")});\n  }\n'
+        "  if (route == kOpenApiDocument) {\n"
+        "    return mado::serve_card_path<kReadMode>(exchange, *card, &kOpenApiCardPath[0]);\n"
+        "  }\n"
+        "  return mado::serve_card_file<kReadMode>(exchange, *card);\n}\n\n"
     )
 
 
-def header_literal(lines: list[str]) -> str:
-    return "".join(f"{cpp_string(line)}\\r\\n" for line in lines)
-
-
-def response_head(asset: Asset) -> str:
-    lines = [
-        f"Content-Type: {asset.content_type}",
-        "Content-Encoding: gzip",
-        f"Content-Length: {len(asset.data)}",
-        f"ETag: {asset.etag}",
-        f"Cache-Control: {asset.cache_control}",
-        "Vary: Accept-Encoding",
-        "X-Content-Type-Options: nosniff",
-        "Referrer-Policy: no-referrer",
-    ]
-    if asset.policy:
-        lines += [f"Content-Security-Policy: {asset.policy}", "X-Frame-Options: DENY"]
-    return header_literal(lines)
-
-
-def revalidated_head(asset: Asset) -> str:
-    return header_literal(
-        [
-            f"ETag: {asset.etag}",
-            f"Cache-Control: {asset.cache_control}",
-            "Vary: Accept-Encoding",
-        ]
-    )
-
-
-def asset_value(index: int, asset: Asset) -> str:
-    return (
-        f"mado::Asset{{&kAsset{index}[0], sizeof(kAsset{index}), "
-        f'F("{response_head(asset)}"), F("{revalidated_head(asset)}"), '
-        f'F("{cpp_string(asset.etag)}")}}'
-    )
-
-
-def render_asset_at(assets: tuple[Asset, ...]) -> str:
-    cases = "".join(
-        f"    case {index}U:\n      return {asset_value(index, asset)};\n"
-        for index, asset in enumerate(assets)
-    )
-    return (
-        "inline mado::Asset asset_at(const uint8_t index) {\n"
-        f"  const bool known = mado::check(index < {len(assets)}U);\n"
-        "  const mado::Asset missing = {nullptr, 0U, nullptr, nullptr, nullptr};\n"
-        "  if (!known) {\n    return missing;\n  }\n"
-        "  switch (index) {\n"
-        f"{cases}"
-        "    default:\n      return missing;\n  }\n}\n\n"
-    )
-
-
-def render_send_static() -> str:
-    return (
-        "template <typename ExchangeT>\n"
-        "bool send_static_asset(ExchangeT& exchange) {\n"
-        "  const uint8_t index = find_asset(exchange.path());\n"
-        "  const bool found = mado::check(index == kNoAsset) || mado::check(index < kNoAsset);\n"
-        "  if ((!found) || (index == kNoAsset)) {\n"
-        "    return exchange.send_empty(mado::http::kNotFound);\n  }\n"
-        "  return mado::send_asset(exchange, asset_at(index));\n}\n\n"
-    )
-
-
-def render_api(api: Api, assets: tuple[Asset, ...], namespace: str) -> str:
-    route_count = len(api.operations) + 1
+def render_api(api: Api, namespace: str) -> str:
+    route_count = len(api.operations) + (2 if api.card else 0)
     return (
         HEADER
-        + f"namespace {namespace} {{\n\n"
-        + render_route_ids(api.operations)
-        + render_routes(api.operations)
+        + (CARD_INCLUDE if api.card else "")
+        + f"\nnamespace {namespace} {{\n\n"
+        + render_route_ids(api.operations, api.card)
+        + render_routes(api.operations, api.card)
         + render_header_names(api.operations)
         + render_limits(
             route_count,
             any(op.secured or op.header_parameters for op in api.operations),
             api.buffers,
         )
-        + render_token_routes(api.operations)
-        + render_path_ids(api.operations)
+        + render_token_routes(api.operations, last_route(api.operations, api.card))
+        + render_path_ids(api.operations, last_route(api.operations, api.card))
         + render_locations(api.operations)
         + "".join(render_schema(schema, api.operations) for schema in api.schemas)
-        + render_asset_data(assets)
-        + render_find_asset(assets)
-        + render_asset_at(assets)
-        + render_send_static()
+        + (render_send_card() if api.card else "")
         + FOOTER
     )
 
 
-def asset_contents(text: str) -> list[bytes]:
-    return [
-        gzip.decompress(
-            bytes(int(token, 16) for token in match.group(1).replace(",", " ").split())
-        )
-        for match in ARRAY.finditer(text)
-    ]
-
-
 def same_output(expected: str, actual: str) -> bool:
-    def shape(text: str) -> str:
-        return GZIP_LENGTH.sub("LENGTH", ARRAY.sub("ARRAY", text))
-
-    shapes_match = shape(expected) == shape(actual)
-    return shapes_match and asset_contents(expected) == asset_contents(actual)
+    return expected == actual

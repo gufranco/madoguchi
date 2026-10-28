@@ -9,10 +9,13 @@
 #include "FakeClient.h"
 #include "FakeClock.h"
 #include "FakeData.h"
+#include "FakeSd.h"
 
 namespace {
 
-using App = PatchApp<FakeClient>;
+constexpr const char* kSpecText = R"({"openapi":"3.1.0"})";
+
+using App = PatchApp<FakeClient, FakeSd, FILE_READ>;
 using AppServer = mado::Server<FakeClient, App, rest_patch::Limits>;
 
 std::string body_of(const std::string& response) {
@@ -34,7 +37,8 @@ class PatchHarness {
  public:
   PatchHarness() {
     fake_clock::set(0U);
-    App::begin();
+    card_.files()["/openapi.json"] = kSpecText;
+    App::begin(card_, 4U);
   }
 
   std::string send(const ExchangePatch& request) {
@@ -46,6 +50,7 @@ class PatchHarness {
   }
 
  private:
+  FakeSd card_;
   AppServer server_{&rest_patch::kRoutes[0], &rest_patch::kHeaderNames[0]};
 };
 

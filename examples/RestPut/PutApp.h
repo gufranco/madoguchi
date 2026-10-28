@@ -24,28 +24,35 @@ struct PutState {
   mado::SlotTable<rest_put::Item, kPutSlots> items;
 };
 
-template <typename ClientT>
+template <typename ClientT, typename SdT, uint16_t kReadMode>
 struct PutApp {
   using Exchange = mado::Exchange<ClientT, rest_put::Limits>;
+
+  static SdT*& card() {
+    static SdT* instance = nullptr;
+    return instance;
+  }
 
   static PutState& state() {
     static PutState instance = {};
     return instance;
   }
 
-  static void begin() {
+  static void begin(SdT& sd, const uint8_t chip_select) {
     state() = PutState{};
+    card() = sd.begin(chip_select) ? &sd : nullptr;
     seed("lamp", true);
     seed("fan", false);
   }
 
   static bool handle(Exchange& exchange, const uint8_t route) {
-    const bool known = mado::check(route <= rest_put::kStaticAsset);
+    const bool known = mado::check(route <= rest_put::kCardFile);
     if (!known) {
       return exchange.send_empty(mado::http::kNotFound);
     }
-    return (route == rest_put::kReplaceItem) ? replace_item(exchange, route)
-                                             : rest_put::send_static_asset(exchange);
+    return (route == rest_put::kReplaceItem)
+               ? replace_item(exchange, route)
+               : rest_put::send_card<kReadMode>(exchange, card(), route);
   }
 
  private:

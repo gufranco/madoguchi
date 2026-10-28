@@ -2,7 +2,7 @@
 
 <h1>Madoguchi</h1>
 
-<strong>Small, heap-free HTTP server for the Uno R3 and Uno R4 Minima, with a JWT-secured REST API on the R4.</strong>
+<strong>Heap-free HTTP server for the Arduino Uno R4 Minima that serves its pages from the SD card and a JWT-secured REST API generated from OpenAPI.</strong>
 
 <br>
 <br>
@@ -17,6 +17,7 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 <p align="center">
   <a href="#quick-start">Quick start</a> |
   <a href="#examples">Examples</a> |
+  <a href="#the-sd-card-web-projects">SD card pages</a> |
   <a href="#rest-api-with-openapi-and-jwt">REST API</a> |
   <a href="#development">Development</a> |
   <a href="CHANGELOG.md">Changelog</a>
@@ -24,35 +25,32 @@ English | [日本語](README.ja.md) | [简体中文](README.zh-Hans.md) | [繁�
 
 ---
 
-Madoguchi runs on the Uno R3's ATmega328P next to the Ethernet and SD libraries and allocates nothing on the heap. On the Uno R4 Minima it serves a complete REST API generated from one OpenAPI document: JWT login, JSON bodies, every HTTP verb, a site at `/` and Swagger UI at `/docs`. CI builds all 17 examples for the boards they target, fails any build over a board's flash or RAM budget, runs 1,142 host tests, 113 tool tests and 12 page-script tests, and fuzzes the parsers on every push and pull request.
+Madoguchi runs on the Uno R4 Minima with a W5x00 or ENC28J60 shield and an SD card, and allocates nothing on the heap. The C++ code holds no HTML, CSS, script or image: every page lives on the card and comes from a separate web project per example, written in TypeScript with classless Pico CSS, built by Vite into the card's files with gzip copies. The board answers the REST API generated from one OpenAPI document, with JWT login, JSON bodies and every HTTP verb. CI builds all 9 examples, fails any build over the board's flash or RAM budget, runs 1,182 host tests, 91 tool tests, 106 page tests and 32 browser tests, builds every card, and fuzzes the parsers on every push and pull request.
 
 The name is 窓口, Japanese for the service counter where you hand over a request and get an answer back.
 
 ## Usage
 
-A handler is a static function that switches on a route id. The core of [`SimpleWebServer`](examples/SimpleWebServer/SimpleWebServer.ino), which takes 18,640 bytes of flash on the Uno R3:
+A handler is a static function that switches on a route id. Pages come from the card, and the API comes from code. The core of a sketch:
 
 ```cpp
 struct WebApp {
   static bool handle(WebExchange& exchange, const uint8_t route) {
-    const bool known = route == kIndex;
-    if (!known) {
-      return exchange.send_empty(404U);
+    switch (route) {
+      case kStatus: return send_status_json(exchange);
+      default: return mado::serve_card_file<FILE_READ>(exchange, sd_card);
     }
-    const bool status = exchange.send_status(200U);
-    const bool type = exchange.send_content_type(F("text/html"));
-    const bool ended = exchange.end_headers();
-    const size_t written = exchange.print(F("<html><body><h1>Hello World!</h1></body></html>\n"));
-    return status && type && ended && (written > 0U);
   }
 };
 
-const char kIndexPath[] PROGMEM = "/";
+const char kStatusPath[] PROGMEM = "/api/status";
+const char kCardPath[] PROGMEM = "/*";
 const mado::Route kRoutes[] PROGMEM = {
-    {&kIndexPath[0], mado::Method::kGet, kIndex},
+    {&kStatusPath[0], mado::Method::kGet, kStatus},
+    {&kCardPath[0], mado::Method::kGet, kCard},
     {nullptr, mado::Method::kAny, 0U},
 };
-mado::Server<EthernetClient, WebApp> web(kRoutes, nullptr);
+mado::Server<EthernetClient, WebApp> web(&kRoutes[0], &kHeaderNames[0]);
 
 void loop() {
   EthernetClient client = ethernet_server.available();
@@ -63,7 +61,7 @@ void loop() {
 }
 ```
 
-`process()` returns at once when no request is waiting. Otherwise it reads the request, calls `WebApp::handle` with the id of the matching route, and closes the connection.
+`process()` returns at once when no request is waiting. Otherwise it reads the request, calls `WebApp::handle` with the id of the matching route, and closes the connection. `serve_card_file()` maps `/` to `/index.html`, prefers the `.gz` copy next to a file when the browser accepts gzip, and caches hashed file names for a year.
 
 ## Quick start
 
@@ -71,9 +69,10 @@ void loop() {
 
 | Tool | Version | Needed for |
 |:-----|:--------|:-----------|
-| [arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE | arduino-cli 1.5.1 is what CI uses | Building for a board |
-| `arduino:avr` or `arduino:renesas_uno` core | 1.8.8 or 1.6.0 | The Uno R3 or the Uno R4 Minima |
-| Ethernet library | 2.0.2 | Every example except EthernetENC |
+| [arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE | arduino-cli 1.5.1 is what CI uses | Building for the board |
+| `arduino:renesas_uno` core | 1.6.0 | The Uno R4 Minima |
+| Ethernet and SdFat libraries | Ethernet 2.0.2, SdFat 2.3.0 | Every example |
+| Node.js and pnpm | Node 24, pnpm 12.15.0 | Building the pages for the card |
 | CMake and a C++ compiler | CMake 3.24 or later | Running the REST API on a computer |
 
 ### Install
@@ -83,35 +82,37 @@ Madoguchi is not in the Arduino Library Manager. Install it from this repository
 ```sh
 arduino-cli config set library.enable_unsafe_install true
 arduino-cli lib install --git-url https://github.com/gufranco/madoguchi.git
-arduino-cli lib install Ethernet@2.0.2
+arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 ```
 
 In the Arduino IDE, download the repository as a ZIP and use **Sketch > Include Library > Add .ZIP Library**.
 
-The library has no dependency of its own. SD, EthernetENC and ArduinoJson are needed only by the examples that include them.
-
-### Build for a board
+### Build the board and the card
 
 From a clone of this repository, with the board on USB:
 
 ```sh
 git clone https://github.com/gufranco/madoguchi.git
-cd Madoguchi
-arduino-cli compile --fqbn arduino:avr:uno --library . examples/SimpleWebServer
+cd madoguchi
+arduino-cli compile --fqbn arduino:renesas_uno:minima --library . examples/RestGet
 arduino-cli board list
-arduino-cli upload --fqbn arduino:avr:uno --port <port from board list> examples/SimpleWebServer
+arduino-cli upload --fqbn arduino:renesas_uno:minima --port <port from board list> examples/RestGet
+corepack enable
+pnpm install
+pnpm --filter ./examples/RestGet/SD\ Card run build
 ```
 
-For the Uno R4 Minima, use `--fqbn arduino:renesas_uno:minima`. The sketch uses the address 192.168.1.177; change it in the sketch if your network uses another range. With a W5x00 shield on the board, `curl http://192.168.1.177/` answers with the Hello World page.
+Copy everything in `examples/RestGet/SD Card/dist` to the root of a FAT16, FAT32 or exFAT microSD card and put it in the shield. [`RestFormat`](examples/RestFormat/RestFormat.ino) prepares a card. The sketch uses the address 192.168.1.177; change it if your network uses another range. Then open `http://192.168.1.177/`.
 
 ### Try the REST API without a board
 
-From the same clone, `mado_host_server` runs the [`RestApi`](examples/RestApi/RestApi.ino) application code on 127.0.0.1, with a test signing key and the password `correct-horse-battery`:
+From the same clone, `mado_host_server` runs the [`RestApi`](examples/RestApi/RestApi.ino) application code on 127.0.0.1, with a test signing key and the password `correct-horse-battery`. Its third argument is a folder that stands in for the card:
 
 ```sh
+pnpm --filter ./examples/RestApi/SD\ Card run build
 cmake -S tests -B build
 cmake --build build --target mado_host_server
-build/mado_host_server 8080
+build/mado_host_server 8080 100000 "examples/RestApi/SD Card/dist"
 ```
 
 In a second terminal:
@@ -136,46 +137,60 @@ Location: /api/items/1
 {"id":1,"name":"lamp","value":3,"on":true}
 ```
 
-Open `http://127.0.0.1:8080/` for the site and `http://127.0.0.1:8080/docs` for Swagger UI.
+Open `http://127.0.0.1:8080/` for the site and `http://127.0.0.1:8080/docs/` for Swagger UI. During page work, `pnpm --filter ./examples/RestApi/SD\ Card run dev` serves the pages with live reload and sends `/api` to the board named in `MADOGUCHI_BOARD`, `http://madoguchi.local` by default.
 
 ## Supported hardware
 
-Madoguchi supports two boards: the Arduino Uno R3, an ATmega328P, and the Arduino Uno R4 Minima, a Renesas RA4M1. No other board is a target.
+Madoguchi supports one board: the Arduino Uno R4 Minima, a Renesas RA4M1. No other board is a target, the Uno R3 and the Uno R4 WiFi included.
 
 | Hardware | Library | Client type |
 |:---------|:--------|:------------|
 | Wiznet W5100, W5200, W5500 shields | Ethernet 2.0.2 | `EthernetClient` |
 | ENC28J60 modules | EthernetENC 2.0.5 | `EthernetClient` |
+| microSD slot on the shield | SdFat 2.3.0 | `SdFs` and `FsFile` |
 
-The server is a template on the client type, so any class with `available()`, `read()`, `read(buffer, size)`, `write(buffer, size)`, `connected()` and `stop()` works.
-
-The ATmega168 is not supported: Ethernet 2.0.2 alone takes 11,208 of its 14,336 bytes of flash. The UNO Q is not supported either, because a sketch on arduino:zephyr 1.0.0 has no socket API.
+The server is a template on the client type, so any class with `available()`, `read()`, `read(buffer, size)`, `write(buffer, size)`, `connected()` and `stop()` works. SdFat reads long file names on FAT16, FAT32 and exFAT. The Arduino SD library reads only 8.3 names, so Madoguchi uses SdFat. Include `<SdFat.h>` after every Madoguchi header: the R4 core defines `F()` as a function, and SdFat replaces it with a macro that drops the flash type.
 
 ## Examples
 
-Sizes in bytes, built with arduino-cli 1.5.1, arduino:avr 1.8.8, arduino:renesas_uno 1.6.0, Ethernet 2.0.2, SD 1.3.0, EthernetENC 2.0.5 and ArduinoJson 7.4.3:
+Sizes in bytes on the Uno R4 Minima, built with arduino-cli 1.5.1, arduino:renesas_uno 1.6.0, Ethernet 2.0.2 and SdFat 2.3.0. Each example but RestFormat has an `SD Card` folder with its pages:
 
-| Example | Shows | Uno R3 flash, of 32,256 | Uno R3 RAM free, of 2,048 | R4 Minima flash, of 262,144 | R4 Minima RAM used, of 32,768 |
-|:--------|:------|------:|------:|------:|------:|
-| [`SimpleWebServer`](examples/SimpleWebServer/SimpleWebServer.ino) | one page | 18,864 | 1,546 | 57,796 | 4,560 |
-| [`FormAndQuery`](examples/FormAndQuery/FormAndQuery.ino) | query strings and urlencoded forms | 21,288 | 1,546 | 59,600 | 4,560 |
-| [`TemplatePage`](examples/TemplatePage/TemplatePage.ino) | `$NAME$` tags in a page in flash | 19,524 | 1,546 | 58,380 | 4,560 |
-| [`BasicAuth`](examples/BasicAuth/BasicAuth.ino) | HTTP Basic credentials | 19,596 | 1,546 | 58,440 | 4,560 |
-| [`JsonApi`](examples/JsonApi/JsonApi.ino) | ArduinoJson responses | 25,978 | 1,494 | 62,564 | 4,564 |
-| [`EthernetENC`](examples/EthernetENC/EthernetENC.ino) | an ENC28J60 module | 25,264 | 851 | 63,176 | 5,184 |
-| [`WebServerSD`](examples/WebServerSD/WebServerSD.ino) | files and folders from SD, with gzip copies | 30,822 | 735 | 65,648 | 5,220 |
-| [`FileUpload`](examples/FileUpload/FileUpload.ino) | `PUT` uploads to SD | 31,554 | 739 | 65,648 | 5,220 |
-| [`BlinkLed`](examples/BlinkLed/BlinkLed.ino) | an LED switched from a page on SD | 31,984 | 738 | 66,108 | 5,224 |
-| [`RestGet`](examples/RestGet/RestGet.ino) | `GET` of the item list and of one item | 24,486 | 1,395 | 61,796 | 4,712 |
-| [`RestPost`](examples/RestPost/RestPost.ino) | `POST` of a new item as JSON | 27,162 | 1,403 | 64,068 | 4,712 |
-| [`RestPut`](examples/RestPut/RestPut.ino) | `PUT` replacing an item | 27,368 | 1,395 | 64,312 | 4,712 |
-| [`RestPatch`](examples/RestPatch/RestPatch.ino) | `PATCH` changing some fields of an item | 27,512 | 1,395 | 64,296 | 4,712 |
-| [`RestDelete`](examples/RestDelete/RestDelete.ino) | `DELETE` of an item by id | 23,206 | 1,395 | 60,948 | 4,712 |
-| [`RestAuth`](examples/RestAuth/RestAuth.ino) | login and one protected route | does not fit |  | 80,072 | 5,600 |
-| [`RestFiles`](examples/RestFiles/RestFiles.ino) | files on SD: list, download, ranges, upload with progress, delete | does not fit |  | 93,312 | 6,392 |
-| [`RestApi`](examples/RestApi/RestApi.ino) | the full API, site and Swagger UI | does not fit |  | 104,828 | 6,088 |
+| Example | Shows | Flash, of 262,144 | RAM used, of 32,768 |
+|:--------|:------|------:|------:|
+| [`RestGet`](examples/RestGet/RestGet.ino) | `GET` of the item list and of one item | 74,072 | 5,920 |
+| [`RestPost`](examples/RestPost/RestPost.ino) | `POST` of a new item as JSON | 76,340 | 5,920 |
+| [`RestPut`](examples/RestPut/RestPut.ino) | `PUT` replacing an item | 76,540 | 5,920 |
+| [`RestPatch`](examples/RestPatch/RestPatch.ino) | `PATCH` changing some fields of an item | 76,508 | 5,920 |
+| [`RestDelete`](examples/RestDelete/RestDelete.ino) | `DELETE` of an item by id | 73,316 | 5,920 |
+| [`RestAuth`](examples/RestAuth/RestAuth.ino) | login and one protected route | 86,920 | 6,144 |
+| [`RestFiles`](examples/RestFiles/RestFiles.ino) | files on SD: list, download, ranges, upload with progress, delete | 94,040 | 6,936 |
+| [`RestApi`](examples/RestApi/RestApi.ino) | the full API, its site, Swagger UI and the request log | 105,644 | 6,632 |
+| [`RestFormat`](examples/RestFormat/RestFormat.ino) | wipe with 0x00 and 0xFF, verify, then format as FAT16, FAT32 or exFAT; JSON only | 71,440 | 9,936 |
 
-RestApi and RestAuth sign tokens, hash passwords and carry the site, and RestFiles carries its site and SHA-256, so the three need the R4 Minima. Every other example fits both boards. CI fails a build that crosses either board's budget, and fails SimpleWebServer on the Uno R3 if it leaves less than 1,024 bytes of RAM for the stack.
+Every example but RestFormat answers `/api/openapi.json` from the card and serves Swagger UI at `/docs/`. CI fails a build that crosses the board's budget.
+
+## The SD card web projects
+
+Every file a browser loads comes from the card. Each example's `SD Card` folder is a web project of its own: semantic HTML, TypeScript in strict mode, classless [Pico CSS](https://picocss.com/) with light and dark mode, and Vitest tests with coverage. The workspace builds them all:
+
+```sh
+corepack enable
+pnpm install
+pnpm run check
+pnpm run test
+pnpm run build
+```
+
+| Step | Tool | What it does |
+|:-----|:-----|:-------------|
+| Check | Biome 2.6.3, TypeScript 7.0.2, html-validate 11.17.0 | lint and format, strict type check, HTML standards |
+| Test | Vitest 5.0.5 with happy-dom | each page against a fake board, 95 percent coverage gate |
+| Build | Vite 8.3.5 and `@madoguchi/kit/vite` | TypeScript bundled into files named after an 8-character hex hash, HTML minified, a `.gz` copy next to every file that shrinks, the OpenAPI document copied to `openapi.json`, every name checked against what the board serves |
+| Browser | Playwright 1.64.0 with Chromium | each built page and its docs page at 320 px and 1280 px, the board faked by route interception: headings, computed styles, no horizontal scroll, the theme toggle, a keyboard focus ring, every Swagger operation, an empty console |
+
+Third-party front-end code never goes on the card. Pico CSS 2.1.1 loads from jsDelivr and Swagger UI 5.33.2 from unpkg, each pinned to an exact version with a Subresource Integrity hash. The build writes a Content-Security-Policy into each page that allows only the page's own files and those CDN hosts. The theme follows the system setting until the visitor presses the toggle, and the choice is kept in the browser.
+
+The shared code lives in [`web/kit`](web/kit): the CDN pins, the theme toggle, the fetch helpers that read RFC 9457 problems, the bearer session kept in memory only, and the Vite configuration.
 
 ## Architecture
 
@@ -183,24 +198,28 @@ RestApi and RestAuth sign tokens, hash passwords and carry the site, and RestFil
 graph LR
     subgraph Build time on a computer
         Spec[openapi.json] --> Gen[tools/madogen]
-        Site[www folder] --> Gen
         Gen --> Header[generated_api.h]
+        Pages[SD Card web project] --> Vite[Vite and the kit]
+        Spec --> Vite
+        Vite --> Card[Card files and gz copies]
     end
     subgraph Board
         Client[EthernetClient] --> Server[mado::Server process]
-        Server --> Parse[Request line and headers]
-        Parse --> Lookup[Route table lookup]
+        Server --> Lookup[Route table lookup]
         Lookup --> App[AppT handle by route id]
         App --> Exchange[mado::Exchange output buffer]
+        App --> SD[serve_card_file from SD]
+        SD --> Exchange
         Exchange --> Client
     end
     Header --> Lookup
-    Header --> App
+    Card --> SD
 ```
 
+- No asset lives in C++ code. Code writes only data: JSON, RFC 9457 problems and short status messages.
 - Buffers are fixed and sized by a `Limits` type passed as a template argument. Nothing is allocated on the heap.
 - The library holds no function pointers and declares no virtual functions. A static `handle` that switches on the route id keeps the call graph visible to analyzers.
-- Every loop has an iteration cap, every read has a timeout and a whole request has a deadline, so a slow client cannot hang the sketch. Constant strings and tables live in flash through `F()` and `PROGMEM`.
+- Every loop has an iteration cap, every read has a timeout and a whole request has a deadline, so a slow client cannot hang the sketch.
 - Requests are parsed as RFC 9112 requires: an `HTTP/1.1` request needs exactly one `Host`, a repeated `Content-Length` gets `400`, `Transfer-Encoding` gets `501`, and a body the handler left unread is read and dropped before the connection closes.
 
 The code follows the JPL D-60411 C standard and the Power of Ten rules at their strictest reading, adapted to C++. [`AGENTS.md`](AGENTS.md) lists every rule and how it applies.
@@ -213,15 +232,14 @@ The code follows the JPL D-60411 C standard and the Power of Ten rules at their 
 | Requests | Query parameters and urlencoded form fields decoded into your buffers | `query_param()`, `mado::next_form_field()` |
 | Requests | Only the headers you name, matched without regard to case; bodies in blocks after `100 Continue` | `header()`, `read_body()` |
 | Requests | `408` on a stalled read or a slow request, `414` on a long request line, `431` on too many header lines, `505` on any version but HTTP/1.0 and 1.1 | automatic |
-| Requests | Only the `Host` names you list, with or without a port, against DNS rebinding; a hook called with every response status | `PolicyT::trusted_hosts()`, `PolicyT::on_response()` |
-| Responses | Status lines with reason phrases, any header, CORS for listed origins, redirects, output gathered into 32-byte writes | `send_status()`, `send_header()`, `mado::send_cors_headers()`, `send_redirect()`, `mado::Reply` |
+| Requests | Only the `Host` names you list, with or without a port, against DNS rebinding; a hook called with every response | `PolicyT::trusted_hosts()`, `PolicyT::on_response()` |
+| Responses | Status lines with reason phrases, any header, CORS for listed origins, redirects, output gathered into writes of up to 1,460 bytes | `send_status()`, `send_header()`, `mado::send_cors_headers()`, `send_redirect()`, `mado::Reply` |
 | Responses | RFC 9457 problem details: `application/problem+json` with a title, the status and a detail | `mado::send_problem()`, `mado::json_problem()` |
-| Responses | `$NAME$` tags in pages stored in flash; ArduinoJson documents with an exact `Content-Length` | `mado::send_template()`, `mado::send_json()` |
-| Files | Files from SD or any readable file, with folders, gzip copies and a content type per extension | `mado::send_file()`, `mado::content_type_for()`, `mado::accepts_gzip()` |
+| Responses | `$NAME$` tags in a template read from a file; ArduinoJson documents with an exact `Content-Length` | `mado::send_template()`, `mado::send_json()` |
+| Card | Pages and files from the card: `/` to `index.html`, a `.gz` copy next to each file, `Vary: Accept-Encoding`, a year of caching for hashed names and `no-cache` for the rest | `mado::serve_card_file()`, `mado::serve_card_path()` |
+| Files | Files with a content type per extension; one byte range with `206` or `416` and `If-Range`, a weak ETag with `304`, and a download name | `mado::send_file()`, `mado::FileReply`, `mado::content_type_for()` |
 | Files | URL paths decoded and checked; `.` and `..` segments, empty segments, backslashes and encoded NUL bytes are rejected | `mado::resolve_static_path()` |
-| Files | One byte range with `206` or `416` and `If-Range`, a weak ETag with `304`, and a download name | `mado::send_file(exchange, file, mado::FileReply)` |
-| Files | Uploads checked against 8.3 names and a `Repr-Digest`, written to a temporary file and moved into place | `mado::valid_short_name()`, `mado::parse_repr_digest()`, `mado::copy_file()`, `mado::replace_file()` |
-| Files | Minified, gzipped files in flash with an ETag, `304 Not Modified`, `406 Not Acceptable`, a Content-Security-Policy and a header block built at compile time | `mado::send_asset()` |
+| Files | Uploads checked against long names and a `Repr-Digest`, written to a temporary file and moved into place; sizes over 4 GiB refused | `mado::valid_card_name()`, `mado::parse_repr_digest()`, `mado::copy_file()`, `mado::replace_file()`, `mado::file_length()` |
 | Network | DHCP with a timeout and a fixed fallback address; a random MAC created once and kept in EEPROM | `mado::begin_network()`, `mado::load_mac()` |
 | Network | A restart when the cable or the chip comes back; `<name>.local` answered over mDNS | `mado::NetworkWatch`, `mado::MdnsResponder` |
 | Storage | One JSON line per response in the shape pino-http writes, rotated past a size you set | `mado::SdLog`, `mado::write_request_log()` |
@@ -232,16 +250,16 @@ The code follows the JPL D-60411 C standard and the Power of Ten rules at their 
 | Auth | SHA-256, HMAC-SHA256 and Base64url | `mado::Sha256`, `mado::HmacSha256`, `mado::Base64UrlEncoder`, `mado::Base64UrlDecoder` |
 | REST | JSON request bodies read field by field with no document in RAM; escaped JSON strings | `mado::JsonReader`, `mado::json_write_string()` |
 | REST | `{id}` read from the end of a path; a fixed table of records | `mado::parse_path_id()`, `mado::SlotTable` |
-| REST | C++ generated from an OpenAPI 3.1 document and a folder of web files | [`tools/madogen`](tools/madogen/cli.py) |
+| REST | C++ routes and schemas generated from an OpenAPI 3.1 document | [`tools/madogen`](tools/madogen/cli.py) |
 
 ## Guide
 
 ### Routes and handlers
 
-A route is `{path, method, id}`, and the table ends with an entry whose path is `nullptr`. Routes match in table order, so put specific paths before wildcards.
+A route is `{path, method, id}`, and the table ends with an entry whose path is `nullptr`. Routes match in table order, so put specific paths before wildcards, and the card route `/*` last.
 
-- An exact path such as `/led` matches only `/led`. The query string is ignored when matching.
-- A path ending in `*`, such as `/files/*`, matches every path that starts with `/files/`.
+- An exact path such as `/api/status` matches only that path. The query string is ignored when matching.
+- A path ending in `*`, such as `/api/files/*`, matches every path that starts with `/api/files/`.
 - `mado::Method::kAny` accepts every method. A `kGet` route also answers `HEAD`, and the body is left out.
 - A path that matches with the wrong method gets `405`. No match at all gets `404`.
 
@@ -280,7 +298,7 @@ A route is `{path, method, id}`, and the table ends with an entry whose path is 
 
 ### Request headers
 
-Name the headers you need when you create the server. Their values share a fixed pool, 48 bytes by default, and longer values are cut short. `Content-Length` and `Expect` are always read.
+Name the headers you need when you create the server. Their values share a fixed pool, 48 bytes by default, and longer values are cut short. `Content-Length` and `Expect` are always read. A card route needs `Accept-Encoding` to pick the gzip copies.
 
 ```cpp
 const char kAuthorization[] PROGMEM = "Authorization";
@@ -305,32 +323,19 @@ while (mado::next_form_field(exchange, &name[0], sizeof(name), &value[0], sizeof
 }
 ```
 
-[`FormAndQuery`](examples/FormAndQuery/FormAndQuery.ino) is the full sketch.
-
-### Static files and uploads
+### Files on the card
 
 ```cpp
-#include <mado/content_type_for.h>
-#include <mado/resolve_static_path.h>
-#include <mado/send_file.h>
+#include <mado/serve_card_file.h>
 
-char path[40];
-if (!mado::resolve_static_path(exchange.path(), "", F("INDEX.HTM"), &path[0], sizeof(path))) {
-  return exchange.send_empty(mado::http::kBadRequest);
-}
-File file = SD.open(&path[0], FILE_READ);
-mado::send_file(exchange, file, file.size(), mado::content_type_for(&path[0]), false);
+const bool served = mado::serve_card_file<FILE_READ>(exchange, sd_card);
+const char kSpecPath[] PROGMEM = "/openapi.json";
+const bool spec = mado::serve_card_path<FILE_READ>(exchange, sd_card, &kSpecPath[0]);
 ```
 
-An optional sixth argument, such as `F("max-age=300")`, adds a `Cache-Control` header for about 70 bytes of flash; WebServerSD and BlinkLed use it, since full ETag support would not fit next to SD on the Uno R3.
+`serve_card_file()` resolves the request path on the card, answers `400` for a path that climbs out and `404` for a missing file or a folder, and sends the `.gz` copy next to the file when the browser accepts gzip. A name that is eight hex digits and an extension, such as `9f86d081.js`, is cached as `public, max-age=31536000, immutable`; every other file gets `no-cache`. `serve_card_path()` serves one fixed file, which is how `/api/openapi.json` reaches `/openapi.json`.
 
-For ranges, conditional requests and downloads, pass a `mado::FileReply` with the size, type, gzip flag, ETag, download name and `Cache-Control` value. `mado::file_etag()` builds a weak ETag from the name, the size and a version that the sketch changes on every write and at boot, so a file replaced by one of the same size gets a new tag. A `Range` with `If-Range` gets the whole file, because a weak tag cannot prove the parts belong together.
-
-[`WebServerSD`](examples/WebServerSD/WebServerSD.ino) keeps pre-compressed copies under `/GZ`, because the SD library accepts only 8.3 names. [`FileUpload`](examples/FileUpload/FileUpload.ino) stores `PUT /upload/NAME` on the card:
-
-```sh
-curl --upload-file index.htm http://192.168.1.177/upload/index.htm
-```
+For downloads, ranges and conditional requests, pass a `mado::FileReply` to `mado::send_file()` with the size, type, gzip flag, ETag, download name and `Cache-Control` value. `mado::file_etag()` builds a weak ETag from the name, the size and a version that the sketch changes on every write and at boot, so a file replaced by one of the same size gets a new tag. A `Range` with `If-Range` gets the whole file, because a weak tag cannot prove the parts belong together. [`RestFiles`](examples/RestFiles/RestFiles.ino) uses all of it.
 
 ### Basic auth
 
@@ -350,7 +355,10 @@ The expected value is `user:password` in Base64, from `printf 'admin:change-me' 
 
 ### Templates
 
+A template is a file on the card with `$NAME$` tags that code fills in while it streams the file:
+
 ```cpp
+#include <mado/FileSource.h>
 #include <mado/send_template.h>
 
 struct PageTags {
@@ -363,10 +371,12 @@ struct PageTags {
   }
 };
 
-mado::send_template<WebExchange, PageTags>(exchange, F("<p>Reading: $TEMP$</p>"));
+FsFile page = sd_card.open("/status.html", FILE_READ);
+mado::FileSource<FsFile> source(page);
+mado::send_template<WebExchange, PageTags>(exchange, source);
 ```
 
-Tags are up to 16 letters, digits or underscores. An unknown tag is sent as written.
+Tags are up to 16 letters, digits or underscores. An unknown tag is sent as written, and `$$` before a tag keeps one `$`.
 
 ### JSON with ArduinoJson
 
@@ -416,9 +426,9 @@ mado::Server<EthernetClient, WebApp, BigLimits> web(&kRoutes[0], nullptr);
 | `kMaxPollsPerRead` | 100000 | upper bound on polls per read |
 | `kRequestTimeoutMs` | 5000 | time for the request line and headers, and again for the body, before `408` |
 | `kMaxDrainBytes` | 1024 | unread body bytes dropped before closing; a longer body is left unread |
-| `kFileChunkSize` | 32 | bytes read from a file per step of `send_file()` |
+| `kFileChunkSize` | 32 | bytes read from a file per step of a file response |
 
-A fourth template argument, the policy, lists the trusted hosts and receives each response status. The default trusts any `Host` up to 255 bytes and ignores the hook.
+A fourth template argument, the policy, lists the trusted hosts and receives each response. The default trusts any `Host` up to 255 bytes and ignores the hook.
 
 ```cpp
 struct BoardPolicy {
@@ -468,23 +478,49 @@ curl -s -H "Authorization: Bearer $TOKEN" http://madoguchi.local/api/log | jq -c
 
 ## REST API with OpenAPI and JWT
 
-[`RestApi`](examples/RestApi/RestApi.ino) is a complete authenticated API for the Uno R4 Minima with a W5x00 shield:
+[`RestApi`](examples/RestApi/RestApi.ino) is a complete authenticated API with a W5x00 shield:
 
 | Path | Serves |
 |:-----|:-------|
-| `/` | a page that signs in and lists, adds, toggles and deletes items |
-| `/docs` | Swagger UI for the board's own API |
-| `GET /api/openapi.json` | the OpenAPI 3.1 document |
+| `/` | a page that signs in and lists, adds, toggles and deletes items, from the card |
+| `/docs/` | Swagger UI for the board's own API, from the card |
+| `GET /api/openapi.json` | the OpenAPI 3.1 document, from the card |
 | `POST /api/auth/login` | a bearer token for a valid user name and password |
 | `GET /api/items`, `GET /api/items/{id}` | the items, public |
 | `POST /api/items`, `PUT`, `PATCH`, `DELETE /api/items/{id}` | changes, with a bearer token |
 | `GET /api/log`, `DELETE /api/log` | the request log as JSON lines, with `Range` for its end, and clearing it, with a bearer token |
 
-[`RestAuth`](examples/RestAuth/RestAuth.ino) shows login and one protected route. [`RestGet`](examples/RestGet/RestGet.ino), [`RestPost`](examples/RestPost/RestPost.ino), [`RestPut`](examples/RestPut/RestPut.ino), [`RestPatch`](examples/RestPatch/RestPatch.ino) and [`RestDelete`](examples/RestDelete/RestDelete.ino) each show one verb with no authentication. [`RestFiles`](examples/RestFiles/RestFiles.ino) lists, downloads, uploads with a progress bar and deletes files on the SD card, with no authentication, so it belongs on a trusted network. Each keeps its application code in a header next to the sketch, so the host tests run the code the board runs.
+[`RestAuth`](examples/RestAuth/RestAuth.ino) shows login and one protected route. [`RestGet`](examples/RestGet/RestGet.ino), [`RestPost`](examples/RestPost/RestPost.ino), [`RestPut`](examples/RestPut/RestPut.ino), [`RestPatch`](examples/RestPatch/RestPatch.ino) and [`RestDelete`](examples/RestDelete/RestDelete.ino) each show one verb with no authentication. [`RestFiles`](examples/RestFiles/RestFiles.ino) lists, downloads, uploads with a progress bar and deletes files on the SD card, with no authentication, so it belongs on a trusted network. Each keeps its application code in a header next to the sketch, so the host tests run the code the board runs, and answers `503` with a problem document when the card is missing.
+
+### Wiping and formatting a card
+
+[`RestFormat`](examples/RestFormat/RestFormat.ino) prepares a card for every other example. It answers JSON only, with no pages and no login, so keep it on a trusted network. It erases everything on the card.
+
+| Route | Does |
+|:------|:-----|
+| `GET /api/card` | the capacity in MiB, the kind, `SDSC`, `SDHC` or `SDXC`, and the file system the format writes |
+| `POST /api/card/format` | starts the wipe; the body repeats the capacity, `{"capacity_mib":30436}`, so a request meant for one card never wipes another; `202` with a `Location`, `409` while a wipe runs, `422` for another capacity |
+| `GET /api/card/format` | the phase, its percent, and a detail that names a failure |
+
+The phases are `fill-zero`, `check-zero`, `fill-one`, `check-one`, `format`, `mount` and `done`, or `failed`. The board writes 0x00 to every sector and reads every sector back, then does the same with 0xFF, a few sectors per pass of `loop()`, so the API keeps answering. It then formats the card with SdFat's formatters, picking the file system by capacity, and mounts it to confirm the result:
+
+| Sectors | File system | Card |
+|:--------|:------------|:-----|
+| under 4,194,304, up to 2 GiB | FAT16 | SDSC |
+| up to 67,108,864, 32 GiB | FAT32 | SDHC |
+| more | exFAT | SDXC |
+
+The wipe reads and writes the whole card twice each, so its time grows with the card's size and SPI speed. The format and the mount block the board for a few seconds.
+
+```sh
+curl -s http://192.168.1.177/api/card
+curl -s -H 'Content-Type: application/json' -d '{"capacity_mib":30436}' http://192.168.1.177/api/card/format
+curl -s http://192.168.1.177/api/card/format
+```
 
 ### Generating the API code
 
-Each REST sketch keeps an `openapi.json` and, for RestApi, a `www` folder of HTML, CSS and JavaScript. [`tools/madogen`](tools/madogen/cli.py) turns them into `generated_api.h`, which is committed, so the Arduino IDE builds the sketch with no Python installed. The generator uses only the Python standard library.
+Each REST sketch keeps an `openapi.json`. [`tools/madogen`](tools/madogen/cli.py) turns it into `generated_api.h`, which is committed, so the Arduino IDE builds the sketch with no Python installed. The generator uses only the Python standard library.
 
 ```sh
 python3 -m tools.madogen generate examples/RestApi
@@ -493,27 +529,26 @@ python3 -m tools.madogen check examples/RestApi
 
 `generate` writes:
 
-- route ids from each `operationId`, and the route table from `paths`;
+- route ids from each `operationId`, the route table from `paths`, a route for `/api/openapi.json` and a last route `/*` for the card;
 - `route_needs_token()`, from each operation's `security`;
 - `route_path_id()`, which reads the `{id}` at the end of a path;
 - a struct and a field reader for every schema in `components.schemas`, checking each `maxLength`, `minimum` and `maximum`, and a JSON writer for each schema a response uses or that sets `x-mado-writer: true`;
 - `read_<schema>_body()`, which checks `Content-Type` and length, reads the body and names the first missing required property in a `mado::Problem`, and `<operation>_url()` for each `GET` by id;
-- every file in `www`, minified and gzipped, with its whole header block, ETag and a Content-Security-Policy for each HTML page; every file but an HTML page is renamed after its content hash and cached for a year as `immutable`, and HTML pages keep their names and revalidate after `documentMaxAge` seconds;
-- the OpenAPI document itself, served at `/api/openapi.json`.
+- `send_card()`, which serves the spec and every other path from the card, and answers `503` when there is no card.
 
-`check` fails when `generated_api.h` no longer matches its sources, or when `arduino_secrets.h` holds a real key. CI runs it on all eight REST examples.
+`check` fails when `generated_api.h` no longer matches its sources, or when `arduino_secrets.h` holds a real key. CI runs it on all nine examples.
 
 The generator accepts a subset of OpenAPI 3.1 and names the JSON pointer of anything outside it:
 
 - paths start with `/api/`, and only the last segment may be a parameter;
 - request bodies are `application/json` referencing a component schema, or `application/octet-stream`;
 - `in: header` parameters become captured request headers;
-- an optional top-level `x-mado-limits` sets `outputBufferSize` from 8 to 1,460, `fileChunkSize` up to 1,024 and `documentMaxAge` up to 86,400 seconds;
+- an optional top-level `x-mado-limits` sets `outputBufferSize` from 8 to 1,460 and `fileChunkSize` up to 1,024;
 - schemas are flat objects with `additionalProperties: false`, holding strings with `maxLength`, integers with `minimum` and `maximum`, and booleans;
 - security is `[]` or `[{"bearerAuth": []}]`, with `bearerAuth` an HTTP bearer JWT scheme;
 - at most 31 operations.
 
-Pages keep scripts and styles in files. An inline script, a `style` attribute or an `on...` handler stops generation, because the policy would block it. A script or stylesheet from another host needs an `integrity` hash, which `python3 -m tools.madogen sri FILE` prints.
+`python3 -m tools.madogen sri FILE` prints the Subresource Integrity hash of a file, for pinning a new CDN file in the kit.
 
 ### Signing in
 
@@ -529,25 +564,27 @@ It asks for a password of 12 to 64 characters and writes a random 32-byte signin
 - A token lasts 15 minutes of uptime and ends when the board restarts, because each start bumps a session counter in EEPROM.
 - Five failed logins in a row lock login for 15 minutes and answer `429` with `Retry-After`.
 - Passwords use PBKDF2 because Argon2id and bcrypt need more RAM than the board has. Tune `--iterations` so a login takes about one second.
+- The pages keep the token in memory only, never in browser storage, so a reload signs out.
 
-`/docs` loads Swagger UI 5.33.2 from unpkg.com with Subresource Integrity, so the browser needs internet access for that page. Every other page and the API work offline.
+The pages load Pico CSS and Swagger UI from public CDNs, so the browser needs internet access for styling and for `/docs/`. The API itself works offline.
 
-The generated `Limits` raises the header pool to 240 bytes, which holds a bearer token next to `Accept-Encoding`, `If-None-Match` and `Content-Type`. Request bodies over 256 bytes get `413`, and every API error carries an `application/problem+json` body such as `{"title":"Unprocessable Content","status":422,"detail":"missing required property: on"}`. Static files are stored only gzipped, and a client that does not accept gzip gets `406`.
+The generated `Limits` raises the header pool to 240 bytes, which holds a bearer token next to `Accept-Encoding`, `If-None-Match` and `Content-Type`. Request bodies over 256 bytes get `413`, and every API error carries an `application/problem+json` body such as `{"title":"Unprocessable Content","status":422,"detail":"missing required property: on"}`.
 
 ## Development
 
-Host tests use CMake and googletest, with a small Arduino shim and a fake client.
+Host tests use CMake and googletest, with a small Arduino shim, a fake client, a fake SD card that matches names without regard to case, as FAT does, and a fake sector device for the format example.
 
 | Suite | Command | Covers |
 |:------|:--------|:-------|
-| Library and examples | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,142 tests: an RFC 9112 conformance table, parsing, routing, responses, files, ranges, the network helpers, the SD log, crypto, tokens, the REST examples' application code, and a replay of each fuzz corpus |
+| Library and examples | `cmake -S tests -B build -DMADO_COVERAGE=ON && cmake --build build && ctest --test-dir build --output-on-failure` | 1,182 tests: an RFC 9112 conformance table, parsing, routing, responses, card files, ranges, the network helpers, the SD log, crypto, tokens, the examples' application code, and a replay of each fuzz corpus |
 | Coverage | `gcovr build --root . --filter src/ --merge-lines --txt` | line and function coverage of `src/`, gated at 95 percent in CI |
-| Generator and gates | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | 113 tests for `madogen`, its minifier, the assertion density gate, the size gate and the throughput tool |
-| Page scripts | `node --test tests/web/*.test.mjs` | 12 tests for the RestApi site, its log view, the RestFiles page and the Swagger UI loader |
+| Generator and gates | `python3 -m pytest -q tests/madogen tests/assertion_density tests/size_gate tests/throughput` | 91 tests for `madogen`, the assertion density gate, the size gate and the throughput tool |
+| Pages | `pnpm run check && pnpm run test && pnpm run build` | Biome, TypeScript, html-validate, 106 Vitest tests with a 95 percent coverage gate, and every card build |
+| Browser | `pnpm exec playwright install chromium && pnpm run build && pnpm run e2e` | 32 Playwright tests: every page and docs page at 320 px and desktop width |
 | Throughput | `python3 tools/throughput.py --download http://madoguchi.local/ --upload http://madoguchi.local/api/files/BENCH.BIN` | download and upload speed against a board, printed as JSON |
 | Generated code | `python3 -m tools.madogen check examples/Rest*` | `generated_api.h` matches its sources and no real key is committed |
 | Fuzzing | `cmake -S tests -B fuzz -DMADO_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++ && cmake --build fuzz && fuzz/mado_fuzz_request tests/fuzz/corpus/request` | libFuzzer with AddressSanitizer and UBSan on the server, the RestApi and RestFiles apps, the JSON reader and the text decoders |
-| Size budget | `python3 tools/size_gate.py --fqbn arduino:avr:uno --min-free-ram 1024 examples/SimpleWebServer` | flash and RAM against a board's budget, with zero compiler warnings |
+| Size budget | `python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima examples/RestApi` | flash and RAM against the board's budget, with zero compiler warnings |
 
 CI also runs clang-format, clang-tidy, cppcheck 2.22.0 with `--enable=all`, the assertion density gate and arduino-lint in strict mode, with zero warnings allowed. The exact commands are in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), and the coding rules are in [`AGENTS.md`](AGENTS.md).
 

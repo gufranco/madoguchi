@@ -303,8 +303,9 @@ INSTANTIATE_TEST_SUITE_P(
     Codes, ReasonPhraseTest,
     ::testing::Values(
         PhraseCase{100U, "Continue"}, PhraseCase{200U, "OK"}, PhraseCase{201U, "Created"},
-        PhraseCase{204U, "No Content"}, PhraseCase{301U, "Moved Permanently"},
-        PhraseCase{302U, "Found"}, PhraseCase{303U, "See Other"}, PhraseCase{304U, "Not Modified"},
+        PhraseCase{202U, "Accepted"}, PhraseCase{409U, "Conflict"}, PhraseCase{204U, "No Content"},
+        PhraseCase{301U, "Moved Permanently"}, PhraseCase{302U, "Found"},
+        PhraseCase{303U, "See Other"}, PhraseCase{304U, "Not Modified"},
         PhraseCase{400U, "Bad Request"}, PhraseCase{401U, "Unauthorized"},
         PhraseCase{403U, "Forbidden"}, PhraseCase{404U, "Not Found"},
         PhraseCase{405U, "Method Not Allowed"}, PhraseCase{408U, "Request Timeout"},

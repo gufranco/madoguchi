@@ -226,38 +226,80 @@ TEST(SendFileLimits, ReportsAClientThatFailsMidBody) {
   EXPECT_FALSE(sent);
 }
 
-TEST(TemplateLimits, RejectsAMissingTagBuffer) {
+struct EndlessSource {
+  static int16_t next() {
+    return 'a';
+  }
+};
+
+class ScriptedSource {
+ public:
+  ScriptedSource(const int16_t first, const int16_t second) : first_(first), second_(second) {
+  }
+
+  int16_t next() {
+    const uint8_t position = index_;
+    index_ = static_cast<uint8_t>(index_ + 1U);
+    if (position == 0U) {
+      return first_;
+    }
+    return (position == 1U) ? second_ : static_cast<int16_t>(-1);
+  }
+
+ private:
+  int16_t first_;
+  int16_t second_;
+  uint8_t index_ = 0U;
+};
+
+TEST(TemplateLimits, FailsOnASourceValueBelowTheEndMarker) {
   // Arrange
-  const mado::detail::FlashPage page = {"$A$", 3U};
+  ScriptedSource source(-5, -1);
+  ExchangeHarness harness;
+  HarnessExchange exchange = harness.make();
 
   // Act
-  const uint8_t length = mado::detail::read_tag(page, 1U, nullptr);
+  const bool sent = mado::send_template<HarnessExchange, NoTags>(exchange, source);
 
   // Assert
-  EXPECT_EQ(length, 0U);
+  EXPECT_FALSE(sent);
+  EXPECT_EQ(harness.sent(), "");
 }
 
-TEST(TemplateLimits, RejectsAnEmptyTagName) {
+TEST(TemplateLimits, FailsOnABrokenValueInsideATag) {
+  // Arrange
+  ScriptedSource source('$', 300);
+  ExchangeHarness harness;
+  HarnessExchange exchange = harness.make();
+
+  // Act
+  const bool sent = mado::send_template<HarnessExchange, NoTags>(exchange, source);
+
+  // Assert
+  EXPECT_FALSE(sent);
+  EXPECT_EQ(harness.sent(), "");
+}
+
+TEST(TemplateLimits, RejectsAMissingTag) {
   // Arrange
   ExchangeHarness harness;
   HarnessExchange exchange = harness.make();
 
   // Act
-  const size_t written = mado::detail::emit_tag<HarnessExchange, NoTags>(exchange, "");
+  const bool written = mado::detail::write_unmatched(exchange, nullptr, -1);
 
   // Assert
-  EXPECT_EQ(written, 0U);
+  EXPECT_FALSE(written);
 }
 
-TEST(TemplateLimits, RejectsAPageLongerThanTheTemplateBound) {
+TEST(TemplateLimits, RejectsATemplateLongerThanTheBound) {
   // Arrange
-  const std::string page(0x8001U, 'a');
+  EndlessSource source;
   ExchangeHarness harness;
   HarnessExchange exchange = harness.make();
 
   // Act
-  const bool sent = mado::send_template<HarnessExchange, NoTags>(
-      exchange, reinterpret_cast<const __FlashStringHelper*>(page.c_str()));
+  const bool sent = mado::send_template<HarnessExchange, NoTags>(exchange, source);
 
   // Assert
   EXPECT_FALSE(sent);

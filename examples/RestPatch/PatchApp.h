@@ -24,28 +24,35 @@ struct PatchState {
   mado::SlotTable<rest_patch::Item, kPatchSlots> items;
 };
 
-template <typename ClientT>
+template <typename ClientT, typename SdT, uint16_t kReadMode>
 struct PatchApp {
   using Exchange = mado::Exchange<ClientT, rest_patch::Limits>;
+
+  static SdT*& card() {
+    static SdT* instance = nullptr;
+    return instance;
+  }
 
   static PatchState& state() {
     static PatchState instance = {};
     return instance;
   }
 
-  static void begin() {
+  static void begin(SdT& sd, const uint8_t chip_select) {
     state() = PatchState{};
+    card() = sd.begin(chip_select) ? &sd : nullptr;
     seed("lamp", true);
     seed("fan", false);
   }
 
   static bool handle(Exchange& exchange, const uint8_t route) {
-    const bool known = mado::check(route <= rest_patch::kStaticAsset);
+    const bool known = mado::check(route <= rest_patch::kCardFile);
     if (!known) {
       return exchange.send_empty(mado::http::kNotFound);
     }
-    return (route == rest_patch::kUpdateItem) ? update_item(exchange, route)
-                                              : rest_patch::send_static_asset(exchange);
+    return (route == rest_patch::kUpdateItem)
+               ? update_item(exchange, route)
+               : rest_patch::send_card<kReadMode>(exchange, card(), route);
   }
 
  private:

@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <Madoguchi.h>
 #include <mado/DecodeMode.h>
+#include <mado/FileLength.h>
 #include <mado/FileReply.h>
 #include <mado/Problem.h>
 #include <mado/Reply.h>
@@ -16,6 +17,7 @@
 #include <mado/content_type_for.h>
 #include <mado/copy_file.h>
 #include <mado/file_etag.h>
+#include <mado/file_length.h>
 #include <mado/flash_address.h>
 #include <mado/http_status.h>
 #include <mado/kSha256Size.h>
@@ -23,7 +25,7 @@
 #include <mado/send_file.h>
 #include <mado/send_problem.h>
 #include <mado/url_decode.h>
-#include <mado/valid_short_name.h>
+#include <mado/valid_card_name.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -31,13 +33,14 @@
 
 constexpr uint8_t kFilesListMax = 32U;
 constexpr uint32_t kFilesMaxUpload = 8388608UL;
-constexpr uint8_t kFilesPathSize = 14U;
-constexpr uint8_t kFilesLocationSize = 26U;
+constexpr uint8_t kFilesPathSize = mado::kCardNameSize + 1U;
+constexpr uint8_t kFilesLocationSize = 208U;
+constexpr int32_t kFilesMaxListedSize = 0x7FFFFFFFL;
 constexpr uint16_t kFilesChunkSize = 512U;
 constexpr uint32_t kFilesMaxReads = kFilesMaxUpload + 1UL;
 const char kFilesTemporary[] PROGMEM = "/UPLOAD.TMP";
 
-template <typename ClientT, typename SdT, typename FileT, uint8_t kReadMode, uint8_t kWriteMode>
+template <typename ClientT, typename SdT, typename FileT, uint16_t kReadMode, uint16_t kWriteMode>
 struct FilesApp {
   using Exchange = mado::Exchange<ClientT, rest_files::Limits>;
 
@@ -59,11 +62,15 @@ struct FilesApp {
   }
 
   static bool handle(Exchange& exchange, const uint8_t route) {
-    const bool known = mado::check(route <= rest_files::kStaticAsset);
-    if ((!known) || (route == rest_files::kStaticAsset)) {
-      return rest_files::send_static_asset(exchange);
+    const bool known = mado::check(route <= rest_files::kCardFile);
+    if (!known) {
+      return exchange.send_empty(mado::http::kNotFound);
     }
-    if (!card_ready()) {
+    const bool ready = card_ready();
+    if ((route == rest_files::kOpenApiDocument) || (route == rest_files::kCardFile)) {
+      return rest_files::send_card<kReadMode>(exchange, ready ? state().sd : nullptr, route);
+    }
+    if (!ready) {
       return mado::send_problem(exchange, mado::Problem{mado::http::kServiceUnavailable,
                                                         F("the SD card is not available")});
     }
@@ -71,7 +78,8 @@ struct FilesApp {
       case rest_files::kListFiles: return list_files(exchange);
       case rest_files::kGetFile: return get_file(exchange);
       case rest_files::kPutFile: return put_file(exchange);
-      default: return delete_file(exchange);
+      case rest_files::kDeleteFile: return delete_file(exchange);
+      default: return exchange.send_empty(mado::http::kNotFound);
     }
   }
 
@@ -92,7 +100,10 @@ struct FilesApp {
 
   static bool bad_name(Exchange& exchange) {
     return mado::send_problem(
-        exchange, mado::Problem{mado::http::kBadRequest, F("file names are 8.3, such as LOG.TXT")});
+        exchange,
+        mado::Problem{
+            mado::http::kBadRequest,
+            F("file names are 1 to 64 printable ASCII characters without \\ / : * ? \" < > | %")});
   }
 
   static bool missing(Exchange& exchange) {
@@ -109,7 +120,7 @@ struct FilesApp {
     path[0] = '/';
     const int16_t length = mado::url_decode(name, static_cast<uint16_t>(strlen(name)), &path[1],
                                             kFilesPathSize - 1U, mado::DecodeMode::kPath);
-    return (length > 0) && mado::valid_short_name(&path[1]);
+    return (length > 0) && mado::valid_card_name(&path[1]);
   }
 
   static bool list_files(Exchange& exchange) {
@@ -122,28 +133,36 @@ struct FilesApp {
     mado::Reply<Exchange> reply(exchange);
     bool written = reply.status(mado::http::kOk).json().no_store().end();
     written = written && (exchange.print(F("[")) > 0U);
+    uint8_t listed = 0U;
     for (uint8_t i = 0U; written && (i < kFilesListMax); ++i) {
       FileT entry = root.openNextFile();
       if (!entry) {
         break;
       }
-      written = ((i == 0U) || (exchange.print(F(",")) > 0U)) && write_entry(exchange, entry);
+      rest_files::FileEntry item = {};
+      const bool named = describe(entry, item);
       entry.close();
+      if (named) {
+        written = ((listed == 0U) || (exchange.print(F(",")) > 0U)) &&
+                  rest_files::write_file_entry(exchange, item);
+        listed = static_cast<uint8_t>(listed + 1U);
+      }
     }
     root.close();
     return written && (exchange.print(F("]")) > 0U);
   }
 
-  static bool write_entry(Exchange& exchange, FileT& entry) {
-    rest_files::FileEntry item = {};
-    const char* const name = entry.name();
-    const size_t length = strnlen(name, sizeof(item.name));
-    const bool named = mado::check(length < sizeof(item.name));
-    static_cast<void>(memcpy(&item.name[0], name, named ? length : 0U));
-    const uint32_t size = entry.size();
-    item.size = static_cast<int32_t>((size > 0x7FFFFFFFUL) ? 0x7FFFFFFFUL : size);
+  static bool describe(FileT& entry, rest_files::FileEntry& item) {
+    char name[mado::kCardNameSize + 1U] = {};
+    const size_t length = entry.getName(&name[0], sizeof(name));
+    const bool named = mado::check(length < sizeof(name)) && (length > 0U) &&
+                       (length < sizeof(item.name)) && mado::valid_card_name(&name[0]);
+    static_cast<void>(memcpy(&item.name[0], &name[0], named ? length : 0U));
+    const uint64_t size = entry.size();
+    const uint64_t listed = static_cast<uint64_t>(kFilesMaxListedSize);
+    item.size = static_cast<int32_t>((size > listed) ? listed : size);
     item.directory = entry.isDirectory();
-    return named && rest_files::write_file_entry(exchange, item);
+    return named;
   }
 
   static bool get_file(Exchange& exchange) {
@@ -155,8 +174,14 @@ struct FilesApp {
     if ((!file) || file.isDirectory()) {
       return missing(exchange);
     }
+    const mado::FileLength length = mado::file_length(file);
+    if (!length.fits) {
+      file.close();
+      return mado::send_problem(exchange, mado::Problem{mado::http::kInternalServerError,
+                                                        F("the file is larger than 4 GiB")});
+    }
     char tag[mado::kFileEtagSize] = {};
-    const uint32_t size = file.size();
+    const uint32_t size = length.bytes;
     const bool tagged = mado::file_etag(&path[0], mado::FileStamp{size, state().version}, tag);
     char wanted[2] = {};
     const bool download =
@@ -211,7 +236,8 @@ struct FilesApp {
     FileT from = state().sd->open(&temporary[0], kReadMode);
     FileT to = state().sd->open(path, kWriteMode);
     const bool opened = cleared && static_cast<bool>(from) && static_cast<bool>(to);
-    const bool copied = opened && mado::copy_file(from, to, from.size());
+    const mado::FileLength length = opened ? mado::file_length(from) : mado::FileLength{false, 0U};
+    const bool copied = length.fits && mado::copy_file(from, to, length.bytes);
     from.close();
     to.close();
     static_cast<void>(state().sd->remove(&temporary[0]));
@@ -256,9 +282,48 @@ struct FilesApp {
     char location[kFilesLocationSize] = {};
     const char* const prefix = mado::flash_address(rest_files::get_file_url());
     static_cast<void>(strncpy_P(&location[0], prefix, sizeof(location) - 1U));
-    strncat(&location[0], &path[1], sizeof(location) - strlen(&location[0]) - 1U);
+    const bool encoded = encode_name(&path[1], location);
+    if (!encoded) {
+      return exchange.send_empty(mado::http::kInternalServerError);
+    }
     mado::Reply<Exchange> reply(exchange);
     return reply.status(mado::http::kCreated).header(F("Location"), &location[0]).length(0U).end();
+  }
+
+  static bool unreserved(const char symbol) {
+    const bool alpha = ((symbol >= 'a') && (symbol <= 'z')) || ((symbol >= 'A') && (symbol <= 'Z'));
+    const bool digit = (symbol >= '0') && (symbol <= '9');
+    return alpha || digit || (symbol == '-') || (symbol == '.') || (symbol == '_') ||
+           (symbol == '~');
+  }
+
+  static char hex_digit(const uint8_t nibble) {
+    const bool valid = mado::check(nibble < 16U);
+    const uint8_t base =
+        (nibble < 10U) ? static_cast<uint8_t>('0') : static_cast<uint8_t>('A' - 10);
+    return valid ? static_cast<char>(base + nibble) : '0';
+  }
+
+  static bool encode_name(const char* const name, char (&location)[kFilesLocationSize]) {
+    const bool valid = mado::check(name != nullptr) && mado::check(location[0] == '/');
+    size_t used = valid ? strnlen(&location[0], kFilesLocationSize) : kFilesLocationSize;
+    for (uint8_t i = 0U; valid && (i < mado::kCardNameSize) && (name[i] != '\0'); ++i) {
+      const uint8_t code = static_cast<uint8_t>(name[i]);
+      const bool plain = unreserved(name[i]);
+      const size_t width = plain ? 1U : 3U;
+      if ((used + width) >= kFilesLocationSize) {
+        return false;
+      }
+      if (plain) {
+        location[used] = name[i];
+      } else {
+        location[used] = '%';
+        location[used + 1U] = hex_digit(static_cast<uint8_t>(code >> 4U));
+        location[used + 2U] = hex_digit(static_cast<uint8_t>(code & 0x0FU));
+      }
+      used += width;
+    }
+    return valid && mado::check(used < kFilesLocationSize);
   }
 
   static bool delete_file(Exchange& exchange) {

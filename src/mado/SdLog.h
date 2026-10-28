@@ -19,7 +19,7 @@ namespace mado {
 
 constexpr uint8_t kLogPathSize = 13U;
 
-template <typename SdT, uint8_t kReadMode, uint8_t kWriteMode>
+template <typename SdT, uint16_t kReadMode, uint16_t kWriteMode>
 class SdLog {
   static_assert(kLogPathSize >= 13U, "an 8.3 path with its slash fits");
 

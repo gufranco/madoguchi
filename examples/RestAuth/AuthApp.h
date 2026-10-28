@@ -47,7 +47,8 @@ struct AuthState {
   uint32_t session = 0U;
 };
 
-template <typename ClientT, typename SecretsT, typename SdT, uint8_t kReadMode, uint8_t kWriteMode>
+template <typename ClientT, typename SecretsT, typename SdT, uint16_t kReadMode,
+          uint16_t kWriteMode>
 struct AuthApp {
   using Exchange = mado::Exchange<ClientT, rest_auth::Limits>;
 
@@ -77,14 +78,14 @@ struct AuthApp {
 
   static bool handle(Exchange& exchange, const uint8_t route) {
     tick(millis());
-    const bool known = mado::check(route <= rest_auth::kStaticAsset);
+    const bool known = mado::check(route <= rest_auth::kCardFile);
     if (!known) {
       return mado::send_problem(exchange, mado::Problem{mado::http::kNotFound, nullptr});
     }
     switch (route) {
       case rest_auth::kLogin: return login(exchange);
       case rest_auth::kGetGreeting: return greet(exchange);
-      default: return rest_auth::send_static_asset(exchange);
+      default: return rest_auth::send_card<kReadMode>(exchange, state().sd, route);
     }
   }
 

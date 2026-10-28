@@ -22,10 +22,7 @@
       "Credentials": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "username",
-          "password"
-        ],
+        "required": ["username", "password"],
         "properties": {
           "username": {
             "type": "string",
@@ -40,11 +37,7 @@
       "Token": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "access_token",
-          "token_type",
-          "expires_in"
-        ],
+        "required": ["access_token", "token_type", "expires_in"],
         "properties": {
           "access_token": {
             "type": "string",
@@ -64,9 +57,7 @@
       "Greeting": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "message"
-        ],
+        "required": ["message"],
         "properties": {
           "message": {
             "type": "string",
@@ -77,10 +68,7 @@
       "Problem": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "title",
-          "status"
-        ],
+        "required": ["title", "status"],
         "properties": {
           "title": {
             "type": "string",

@@ -71,7 +71,7 @@ jobs:
         run: >-
           clang-format --dry-run --Werror src/*.h src/mado/*.h tests/*.cpp tests/examples/*.cpp
           tests/fuzz/*.cpp tests/fuzz/*.h tests/support/* tests/shim/*.h tests/host_server/*
-          examples/*/*App.h examples/RestApi/RestStore.h
+          examples/*/*App.h examples/*/*Job.h examples/RestApi/RestStore.h
 
       - name: Format examples
         run: |
@@ -102,9 +102,42 @@ jobs:
         run: >-
           python3 -m tools.madogen check examples/RestApi examples/RestAuth examples/RestGet
           examples/RestPost examples/RestPut examples/RestPatch examples/RestDelete examples/RestFiles
+          examples/RestFormat
 
-      - name: Page scripts
-        run: node --test tests/web/*.test.mjs
+
+  web:
+    name: SD card web projects
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24.22.1"
+
+      - name: Install pnpm from packageManager
+        run: corepack enable && corepack install
+
+      - name: Install the workspace
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint, format, type and HTML checks
+        run: pnpm run check
+
+      - name: Page tests with coverage
+        run: pnpm run test
+
+      - name: Build every card
+        run: pnpm run build
+
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Pages in a real browser at 320 px and desktop width
+        run: pnpm run e2e
 
   fuzz:
     name: Fuzzing
@@ -163,26 +196,15 @@ jobs:
       - name: Install cores and libraries
         run: |
           arduino-cli core update-index
-          arduino-cli core install arduino:avr@1.8.8 arduino:renesas_uno@1.6.0
-          arduino-cli lib install Ethernet@2.0.2 SD@1.3.0 ArduinoJson@7.4.3 EthernetENC@2.0.5
-
-      - name: Uno, minimal example keeps 1 KB of RAM for the stack
-        run: python3 tools/size_gate.py --fqbn arduino:avr:uno --min-free-ram 1024 examples/SimpleWebServer
-
-      - name: Uno R3, every example that fits
-        run: >-
-          python3 tools/size_gate.py --fqbn arduino:avr:uno
-          examples/FormAndQuery examples/TemplatePage examples/BasicAuth examples/JsonApi
-          examples/EthernetENC examples/WebServerSD examples/FileUpload examples/BlinkLed
-          examples/RestGet examples/RestPost examples/RestPut examples/RestPatch examples/RestDelete
+          arduino-cli core install arduino:renesas_uno@1.6.0
+          arduino-cli lib install Ethernet@2.0.2 SdFat@2.3.0
 
       - name: Uno R4 Minima, every example
         run: >-
           python3 tools/size_gate.py --fqbn arduino:renesas_uno:minima
-          examples/SimpleWebServer examples/FormAndQuery examples/TemplatePage examples/BasicAuth
-          examples/JsonApi examples/EthernetENC examples/WebServerSD examples/FileUpload
-          examples/BlinkLed examples/RestApi examples/RestAuth examples/RestGet examples/RestPost
+          examples/RestApi examples/RestAuth examples/RestGet examples/RestPost
           examples/RestPut examples/RestPatch examples/RestDelete examples/RestFiles
+          examples/RestFormat
 
   library:
     name: Arduino library lint

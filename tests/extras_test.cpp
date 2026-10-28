@@ -3,11 +3,15 @@
 #include <MadoguchiJson.h>
 #include <gtest/gtest.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <string>
 
 #include "ExchangeHarness.h"
 #include "FakeData.h"
+#include "FakeFile.h"
+#include "mado/FileSource.h"
+#include "mado/MemorySource.h"
 #include "mado/Method.h"
 #include "mado/check_basic_auth.h"
 #include "mado/http_status.h"
@@ -110,36 +114,38 @@ TEST_P(SendTemplateTest, ReplacesKnownTagsAndKeepsEverythingElse) {
   ExchangeHarness harness;
   HarnessExchange exchange = harness.make();
 
+  mado::MemorySource source(reinterpret_cast<const uint8_t*>(sample.page),
+                            static_cast<uint16_t>(strlen(sample.page)));
+
   // Act
-  const bool sent = mado::send_template<HarnessExchange, TestTags>(
-      exchange, reinterpret_cast<const __FlashStringHelper*>(sample.page));
+  const bool sent = mado::send_template<HarnessExchange, TestTags>(exchange, source);
 
   // Assert
   EXPECT_TRUE(sent);
   EXPECT_EQ(harness.sent(), sample.expected);
 }
 
-INSTANTIATE_TEST_SUITE_P(Pages, SendTemplateTest,
-                         ::testing::Values(TemplateCase{"<p>$TEMP$</p>", "<p>21</p>"},
-                                           TemplateCase{"$TEMP$C $EMPTY$!", "21C !"},
-                                           TemplateCase{"<p>$X$</p>", "<p>$X$</p>"},
-                                           TemplateCase{"cost: 5$", "cost: 5$"},
-                                           TemplateCase{"$$", "$$"}, TemplateCase{"$a-b$", "$a-b$"},
-                                           TemplateCase{"$ABCDEFGHIJKLMNOPQ$",
-                                                        "$ABCDEFGHIJKLMNOPQ$"},
-                                           TemplateCase{"", ""}));
+INSTANTIATE_TEST_SUITE_P(
+    Pages, SendTemplateTest,
+    ::testing::Values(
+        TemplateCase{"<p>$TEMP$</p>", "<p>21</p>"}, TemplateCase{"$TEMP$C $EMPTY$!", "21C !"},
+        TemplateCase{"<p>$X$</p>", "<p>$X$</p>"}, TemplateCase{"cost: 5$", "cost: 5$"},
+        TemplateCase{"$$", "$$"}, TemplateCase{"$$TEMP$", "$21"}, TemplateCase{"$a-b$", "$a-b$"},
+        TemplateCase{"$ABCDEFGHIJKLMNOPQ$", "$ABCDEFGHIJKLMNOPQ$"}, TemplateCase{"", ""}));
 
-TEST(SendTemplate, RejectsAMissingPage) {
+TEST(SendTemplate, ReadsTheTemplateFromAFile) {
   // Arrange
+  FakeFile file("<b>$TEMP$</b>");
+  mado::FileSource<FakeFile> source(file);
   ExchangeHarness harness;
   HarnessExchange exchange = harness.make();
 
   // Act
-  const bool sent = mado::send_template<HarnessExchange, TestTags>(
-      exchange, static_cast<const __FlashStringHelper*>(nullptr));
+  const bool sent = mado::send_template<HarnessExchange, TestTags>(exchange, source);
 
   // Assert
-  EXPECT_FALSE(sent);
+  EXPECT_TRUE(sent);
+  EXPECT_EQ(harness.sent(), "<b>21</b>");
 }
 
 TEST(SendTemplate, StopsWhenTheClientStopsAccepting) {
@@ -149,10 +155,11 @@ TEST(SendTemplate, StopsWhenTheClientStopsAccepting) {
   ExchangeHarness harness;
   harness.client().limit_write(1U);
   HarnessExchange exchange = harness.make();
+  mado::MemorySource source(reinterpret_cast<const uint8_t*>(page.data()),
+                            static_cast<uint16_t>(page.size()));
 
   // Act
-  const bool sent = mado::send_template<HarnessExchange, TestTags>(
-      exchange, reinterpret_cast<const __FlashStringHelper*>(page.c_str()));
+  const bool sent = mado::send_template<HarnessExchange, TestTags>(exchange, source);
 
   // Assert
   EXPECT_FALSE(sent);

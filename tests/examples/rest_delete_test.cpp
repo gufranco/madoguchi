@@ -8,10 +8,13 @@
 #include "../../examples/RestDelete/generated_api.h"
 #include "FakeClient.h"
 #include "FakeClock.h"
+#include "FakeSd.h"
 
 namespace {
 
-using App = DeleteApp<FakeClient>;
+constexpr const char* kSpecText = R"({"openapi":"3.1.0"})";
+
+using App = DeleteApp<FakeClient, FakeSd, FILE_READ>;
 using AppServer = mado::Server<FakeClient, App, rest_delete::Limits>;
 
 std::string status_line(const std::string& response) {
@@ -29,10 +32,12 @@ class RestDeleteTest : public ::testing::Test {
  protected:
   void SetUp() override {
     fake_clock::set(0U);
-    App::begin();
+    card_.files()["/openapi.json"] = kSpecText;
+    App::begin(card_, 4U);
   }
 
  private:
+  FakeSd card_;
   AppServer server_{&rest_delete::kRoutes[0], &rest_delete::kHeaderNames[0]};
 };
 

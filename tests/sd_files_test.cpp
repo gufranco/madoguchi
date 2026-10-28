@@ -9,17 +9,20 @@
 #include "ExchangeHarness.h"
 #include "FakeData.h"
 #include "FakeFile.h"
+#include "FakeSd.h"
 #include "mado/ByteRange.h"
+#include "mado/FileLength.h"
 #include "mado/FileReply.h"
 #include "mado/FileStamp.h"
 #include "mado/Method.h"
 #include "mado/copy_file.h"
 #include "mado/file_etag.h"
+#include "mado/file_length.h"
 #include "mado/kSha256Size.h"
 #include "mado/parse_byte_range.h"
 #include "mado/parse_repr_digest.h"
 #include "mado/send_file.h"
-#include "mado/valid_short_name.h"
+#include "mado/valid_card_name.h"
 
 namespace {
 
@@ -146,29 +149,88 @@ std::ostream& operator<<(std::ostream& stream, const NameCase& sample) {
   return stream << sample.name;
 }
 
-class ShortNameTest : public ::testing::TestWithParam<NameCase> {};
+class CardNameTest : public ::testing::TestWithParam<NameCase> {};
 
-TEST_P(ShortNameTest, AcceptsOnlyEightDotThreeNames) {
+TEST_P(CardNameTest, AcceptsLongNamesTheCardAndAHeaderCanCarry) {
   // Arrange
   const NameCase& sample = GetParam();
 
   // Act
-  const bool valid = mado::valid_short_name(sample.name);
+  const bool valid = mado::valid_card_name(sample.name);
 
   // Assert
   EXPECT_EQ(valid, sample.valid);
 }
 
-INSTANTIATE_TEST_SUITE_P(Names, ShortNameTest,
-                         ::testing::Values(NameCase{"INDEX.HTM", true}, NameCase{"a", true},
-                                           NameCase{"LOG_1-2~.TXT", true}, NameCase{"README", true},
-                                           NameCase{"ABCDEFGH.TXT", true},
-                                           NameCase{"ABCDEFGHI.TXT", false},
-                                           NameCase{"A.HTML", false}, NameCase{"A.", false},
-                                           NameCase{".A", false}, NameCase{"", false},
-                                           NameCase{"A.B.C", false}, NameCase{"A B.TXT", false},
-                                           NameCase{"../X", false}, NameCase{"DIR/A.TXT", false},
-                                           NameCase{"A%2F", false}));
+INSTANTIATE_TEST_SUITE_P(
+    Names, CardNameTest,
+    ::testing::Values(
+        NameCase{"index.html", true}, NameCase{"a", true}, NameCase{"LOG_1-2~.TXT", true},
+        NameCase{"holiday photo (2).jpeg", true}, NameCase{"archive.tar.gz", true},
+        NameCase{"swagger-initializer.js", true},
+        NameCase{"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl", true},
+        NameCase{"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklm", false},
+        NameCase{"A.", false}, NameCase{"A ", false}, NameCase{" A", false}, NameCase{".A", false},
+        NameCase{".", false}, NameCase{"..", false}, NameCase{"", false}, NameCase{"../X", false},
+        NameCase{"DIR/A.TXT", false}, NameCase{"A\\B", false}, NameCase{"A%2F", false},
+        NameCase{"A\"B", false}, NameCase{"A*B", false}, NameCase{"A:B", false},
+        NameCase{"A<B", false}, NameCase{"A>B", false}, NameCase{"A?B", false},
+        NameCase{"A|B", false}, NameCase{"A\tB", false}, NameCase{"caf\xC3\xA9.txt", false},
+        NameCase{"A\x7F", false}));
+
+TEST(FileLength, ReportsTheSizeOfAFileUnderFourGibibytes) {
+  // Arrange
+  FakeData data(20261031U);
+  const std::string content = data.word(37U);
+  FakeSd card;
+  card.files()["/notes.txt"] = content;
+  FakeSdFile file = card.open("/notes.txt", FILE_READ);
+
+  // Act
+  const mado::FileLength length = mado::file_length(file);
+
+  // Assert
+  EXPECT_TRUE(length.fits);
+  EXPECT_EQ(length.bytes, content.size());
+}
+
+TEST(FileLength, RefusesAFileOverFourGibibytes) {
+  // Arrange
+  FakeSd card;
+  card.files()["/movie.mkv"] = "x";
+  card.report_size("/movie.mkv", 0x100000000ULL);
+  FakeSdFile file = card.open("/movie.mkv", FILE_READ);
+
+  // Act
+  const mado::FileLength length = mado::file_length(file);
+
+  // Assert
+  EXPECT_FALSE(length.fits);
+  EXPECT_EQ(length.bytes, 0U);
+}
+
+TEST(FileLength, RefusesAClosedFile) {
+  // Arrange
+  FakeSdFile file;
+
+  // Act
+  const mado::FileLength length = mado::file_length(file);
+
+  // Assert
+  EXPECT_FALSE(length.fits);
+  EXPECT_EQ(length.bytes, 0U);
+}
+
+TEST(CardName, RejectsAMissingName) {
+  // Arrange
+  const char* const name = nullptr;
+
+  // Act
+  const bool valid = mado::valid_card_name(name);
+
+  // Assert
+  EXPECT_FALSE(valid);
+}
 
 TEST(ReprDigest, ReadsASha256DigestInBase64) {
   // Arrange

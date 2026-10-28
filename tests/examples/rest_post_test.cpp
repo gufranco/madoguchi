@@ -9,10 +9,13 @@
 #include "FakeClient.h"
 #include "FakeClock.h"
 #include "FakeData.h"
+#include "FakeSd.h"
 
 namespace {
 
-using App = PostApp<FakeClient>;
+constexpr const char* kSpecText = R"({"openapi":"3.1.0"})";
+
+using App = PostApp<FakeClient, FakeSd, FILE_READ>;
 using AppServer = mado::Server<FakeClient, App, rest_post::Limits>;
 
 std::string body_of(const std::string& response) {
@@ -40,10 +43,12 @@ class RestPostTest : public ::testing::Test {
  protected:
   void SetUp() override {
     fake_clock::set(0U);
-    App::begin();
+    card_.files()["/openapi.json"] = kSpecText;
+    App::begin(card_, 4U);
   }
 
  private:
+  FakeSd card_;
   AppServer server_{&rest_post::kRoutes[0], &rest_post::kHeaderNames[0]};
   FakeData data_{20261027U};
 };

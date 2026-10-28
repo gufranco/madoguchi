@@ -1,0 +1,234 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Madoguchi card format example",
+    "version": "1.0.0",
+    "description": "Fills every sector of the SD card with 0x00, reads it back, fills it with 0xFF, reads it back, then formats the card for SdFat: FAT16 up to 2 GiB, FAT32 up to 32 GiB and exFAT above, and mounts it to confirm. Everything on the card is lost. This example has no login and no pages: keep the board on a trusted network."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "x-mado-card": false,
+  "components": {
+    "schemas": {
+      "Card": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capacity_mib", "kind", "file_system"],
+        "properties": {
+          "capacity_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2097152
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 4
+          },
+          "file_system": {
+            "type": "string",
+            "maxLength": 5
+          }
+        }
+      },
+      "FormatRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capacity_mib"],
+        "properties": {
+          "capacity_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2097152
+          }
+        }
+      },
+      "FormatStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "percent", "capacity_mib", "file_system", "detail"],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "maxLength": 10
+          },
+          "percent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "capacity_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2097152
+          },
+          "file_system": {
+            "type": "string",
+            "maxLength": 5
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "status"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/card": {
+      "get": {
+        "operationId": "getCard",
+        "summary": "Describe the card and the file system it will get",
+        "responses": {
+          "200": {
+            "description": "The card's capacity, its kind, SDSC, SDHC or SDXC, and the file system the format writes: FAT16, FAT32 or exFAT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Card"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No card answers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/card/format": {
+      "get": {
+        "operationId": "getFormat",
+        "summary": "Report the progress of the wipe and format",
+        "responses": {
+          "200": {
+            "description": "The phase, idle, fill-zero, check-zero, fill-one, check-one, format, mount, done or failed, with its progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "startFormat",
+        "summary": "Erase the card and format it",
+        "description": "The body repeats the capacity that GET /api/card reported, so a request meant for one card never wipes another.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FormatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The wipe started; poll GET /api/card/format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON or missing body",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A wipe is already running",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is larger than this operation accepts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type is not application/json",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The capacity does not match the card, or a field is missing or wrong",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No card answers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

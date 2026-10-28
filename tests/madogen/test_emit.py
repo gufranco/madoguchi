@@ -1,10 +1,9 @@
-import gzip
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.madogen.assets import Asset, make_asset
 from tools.madogen.emit import render_api, same_output
 from tools.madogen.spec import Api, Buffers, Field, Kind, Operation, Schema
 
@@ -52,26 +51,17 @@ def operations() -> tuple[Operation, ...]:
     )
 
 
-def page() -> Asset:
-    return make_asset(
-        ("/", "/index.html"),
-        "text/html; charset=utf-8",
-        b"<p>hi</p>",
-        "default-src 'none'",
-    )
-
-
-def test_lists_route_ids_in_spec_order_then_the_static_route() -> None:
+def test_lists_route_ids_in_spec_order_then_the_card_routes() -> None:
     # Arrange
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "items")
+    text = render_api(spec, "items")
 
     # Assert
     assert (
-        "enum RouteId : uint8_t {\n  kGetItem,\n  kListItems,\n  kCreateItem,\n  kDeleteItem,\n  kStaticAsset,\n};"
-        in text
+        "enum RouteId : uint8_t {\n  kGetItem,\n  kListItems,\n  kCreateItem,\n  kDeleteItem,\n"
+        "  kOpenApiDocument,\n  kCardFile,\n};" in text
     )
 
 
@@ -80,24 +70,26 @@ def test_puts_exact_paths_before_wildcards() -> None:
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "items")
+    text = render_api(spec, "items")
 
     # Assert
     table = text[text.index("const mado::Route kRoutes[]") :]
     order = [
         table.index(entry)
         for entry in (
-            "{&kRoutePath0[0], mado::Method::kGet, kListItems}",
-            "{&kRoutePath0[0], mado::Method::kPost, kCreateItem}",
-            "{&kRoutePath1[0], mado::Method::kGet, kGetItem}",
-            "{&kRoutePath1[0], mado::Method::kDelete, kDeleteItem}",
-            "{&kRoutePath2[0], mado::Method::kGet, kStaticAsset}",
+            "{&kRoutePath0[0], mado::Method::kGet, kOpenApiDocument}",
+            "{&kRoutePath1[0], mado::Method::kGet, kListItems}",
+            "{&kRoutePath1[0], mado::Method::kPost, kCreateItem}",
+            "{&kRoutePath2[0], mado::Method::kGet, kGetItem}",
+            "{&kRoutePath2[0], mado::Method::kDelete, kDeleteItem}",
+            "{&kRoutePath3[0], mado::Method::kGet, kCardFile}",
             "{nullptr, mado::Method::kAny, 0U}",
         )
     ]
-    assert 'const char kRoutePath0[] PROGMEM = "/api/items";' in text
-    assert 'const char kRoutePath1[] PROGMEM = "/api/items/*";' in text
-    assert 'const char kRoutePath2[] PROGMEM = "/*";' in text
+    assert 'const char kRoutePath0[] PROGMEM = "/api/openapi.json";' in text
+    assert 'const char kRoutePath1[] PROGMEM = "/api/items";' in text
+    assert 'const char kRoutePath2[] PROGMEM = "/api/items/*";' in text
+    assert 'const char kRoutePath3[] PROGMEM = "/*";' in text
     assert order == sorted(order)
 
 
@@ -106,7 +98,7 @@ def test_captures_only_the_headers_the_api_needs() -> None:
     reads_only = api((operations()[1],))
 
     # Act
-    text = render_api(reads_only, (page(),), "items")
+    text = render_api(reads_only, "items")
 
     # Assert
     assert 'const char kHeaderName0[] PROGMEM = "Accept-Encoding";' in text
@@ -123,7 +115,7 @@ def test_captures_auth_and_type_headers_for_secured_writes() -> None:
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "items")
+    text = render_api(spec, "items")
 
     # Assert
     assert 'const char kHeaderName0[] PROGMEM = "Authorization";' in text
@@ -140,7 +132,7 @@ def test_marks_secured_routes() -> None:
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "items")
+    text = render_api(spec, "items")
 
     # Assert
     assert "    case kCreateItem:\n    case kDeleteItem:\n      return true;" in text
@@ -151,7 +143,7 @@ def test_reads_path_ids_by_route() -> None:
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "items")
+    text = render_api(spec, "items")
 
     # Assert
     assert (
@@ -165,7 +157,7 @@ def test_declares_a_struct_and_masks_per_schema() -> None:
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "items")
+    text = render_api(spec, "items")
 
     # Assert
     assert (
@@ -182,27 +174,40 @@ def test_skips_range_checks_that_cannot_fail() -> None:
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "items")
+    text = render_api(spec, "items")
 
     # Assert
     assert "(number <= 1000)" in text
     assert "(number >= -2147483648)" not in text
 
 
-def test_embeds_assets_and_their_paths() -> None:
+def test_serves_the_spec_and_every_other_path_from_the_card() -> None:
     # Arrange
     spec = api(operations())
-    asset = page()
 
     # Act
-    text = render_api(spec, (asset,), "items")
+    text = render_api(spec, "items")
 
     # Assert
-    assert f"const uint8_t kAsset0[{len(asset.data)}] PROGMEM = {{" in text
+    assert 'const char kOpenApiCardPath[] PROGMEM = "/openapi.json";' in text
     assert (
-        'if (strcmp_P(path, PSTR("/index.html")) == 0) {\n    return 0U;\n  }' in text
+        "mado::serve_card_path<kReadMode>(exchange, *card, &kOpenApiCardPath[0]);"
+        in text
     )
-    assert asset.etag.replace('"', '\\"') in text
+    assert "return mado::serve_card_file<kReadMode>(exchange, *card);" in text
+    assert 'F("the SD card is not available")' in text
+
+
+def test_embeds_no_asset() -> None:
+    # Arrange
+    spec = api(operations())
+
+    # Act
+    text = render_api(spec, "items")
+
+    # Assert
+    assert "const uint8_t kAsset" not in text
+    assert re.search(r"<(?:!doctype|html|head|body|script|style|link)\b", text) is None
 
 
 def test_renders_byte_for_byte_the_same_twice() -> None:
@@ -210,50 +215,23 @@ def test_renders_byte_for_byte_the_same_twice() -> None:
     spec = api(operations())
 
     # Act
-    first = render_api(spec, (page(),), "items")
+    first = render_api(spec, "items")
 
     # Assert
-    assert first == render_api(spec, (page(),), "items")
+    assert first == render_api(spec, "items")
 
 
-def test_compares_assets_by_their_content() -> None:
+def test_notices_any_changed_byte() -> None:
     # Arrange
     spec = api(operations())
-    expected = render_api(spec, (page(),), "items")
-    source = b"<p>hi</p>"
-    stored = gzip.compress(source, compresslevel=1, mtime=0)
-    other = Asset(
-        page().url_paths,
-        page().content_type,
-        stored,
-        page().etag,
-        page().policy,
-        page().cache_control,
-    )
-    actual = render_api(spec, (other,), "items")
+    expected = render_api(spec, "items")
 
     # Act
-    equal = same_output(expected, actual)
-
-    # Assert
-    assert expected != actual
-    assert equal
-
-
-def test_notices_a_changed_asset() -> None:
-    # Arrange
-    spec = api(operations())
-    expected = render_api(spec, (page(),), "items")
-    changed = make_asset(
-        page().url_paths, page().content_type, b"<p>bye</p>", page().policy
-    )
-    actual = render_api(spec, (changed,), "items")
-
-    # Act
-    equal = same_output(expected, actual)
+    equal = same_output(expected, expected.replace("kCardFile", "kCardFiles", 1))
 
     # Assert
     assert not equal
+    assert same_output(expected, render_api(spec, "items"))
 
 
 def test_wraps_everything_in_the_sketch_namespace() -> None:
@@ -261,7 +239,7 @@ def test_wraps_everything_in_the_sketch_namespace() -> None:
     spec = api(operations())
 
     # Act
-    text = render_api(spec, (page(),), "rest_get")
+    text = render_api(spec, "rest_get")
 
     # Assert
     assert "namespace rest_get {\n\nenum RouteId" in text
@@ -275,12 +253,12 @@ def test_emits_a_writer_for_a_request_schema_only_when_marked() -> None:
     unmarked = api((operations()[2],))
 
     # Act
-    text = render_api(marked, (page(),), "items")
+    text = render_api(marked, "items")
 
     # Assert
     assert "read_item(" in text
     assert "write_item(" in text
-    assert "write_item(" not in render_api(unmarked, (page(),), "items")
+    assert "write_item(" not in render_api(unmarked, "items")
 
 
 def test_emits_a_reader_only_for_request_schemas() -> None:
@@ -288,7 +266,7 @@ def test_emits_a_reader_only_for_request_schemas() -> None:
     responses_only = api((operations()[1],))
 
     # Act
-    text = render_api(responses_only, (page(),), "items")
+    text = render_api(responses_only, "items")
 
     # Assert
     assert "write_item(" in text
@@ -301,7 +279,7 @@ def test_emits_a_body_reader_that_names_each_missing_required_field() -> None:
     writes = api((operations()[2],))
 
     # Act
-    text = render_api(writes, (page(),), "items")
+    text = render_api(writes, "items")
 
     # Assert
     assert "mado::Problem read_item_body(ExchangeT& exchange, Item& value" in text
@@ -316,7 +294,7 @@ def test_skips_the_body_reader_for_schemas_never_read() -> None:
     reads = api((operations()[1],))
 
     # Act
-    text = render_api(reads, (page(),), "items")
+    text = render_api(reads, "items")
 
     # Assert
     assert "read_item_body(" not in text
@@ -328,7 +306,7 @@ def test_emits_a_url_prefix_for_each_get_by_id() -> None:
     everything = api(operations())
 
     # Act
-    text = render_api(everything, (page(),), "items")
+    text = render_api(everything, "items")
 
     # Assert
     assert (
@@ -351,10 +329,10 @@ def test_writes_buffer_limits_and_captures_declared_headers() -> None:
         (),
         ("Repr-Digest",),
     )
-    spec = Api("Files", (item_schema(),), (upload,), Buffers(512, 256, 60))
+    spec = Api("Files", (item_schema(),), (upload,), Buffers(512, 256))
 
     # Act
-    text = render_api(spec, (page(),), "files")
+    text = render_api(spec, "files")
 
     # Assert
     assert "kOutputBufferSize = 512U;" in text
@@ -362,3 +340,20 @@ def test_writes_buffer_limits_and_captures_declared_headers() -> None:
     assert "kMaxCapturedHeaders = 8U;" in text
     assert 'const char kHeaderName2[] PROGMEM = "Repr-Digest";' in text
     assert "kHeaderPoolSize = 240U;" in text
+
+
+def test_leaves_out_every_card_route_when_the_card_is_off() -> None:
+    # Arrange
+    spec = Api("Items", (item_schema(),), operations(), Buffers(), False)
+
+    # Act
+    text = render_api(spec, "items")
+
+    # Assert
+    assert "kOpenApiDocument" not in text
+    assert "kCardFile" not in text
+    assert "mado::check(route <= kDeleteItem)" in text
+    assert "send_card" not in text
+    assert "serve_card_file.h" not in text
+    assert '"/*"' not in text
+    assert "static constexpr uint8_t kMaxRoutes = 4U;" in text
