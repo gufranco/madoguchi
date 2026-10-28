@@ -26,6 +26,7 @@ inline Problem json_problem(const JsonStatus status) {
   }
   switch (status) {
     case JsonStatus::kTooLong: return Problem{code, F("a string is longer than its maxLength")};
+    case JsonStatus::kTooShort: return Problem{code, F("a string is shorter than its minLength")};
     case JsonStatus::kOutOfRange: return Problem{code, F("a number is outside its range")};
     case JsonStatus::kWrongType: return Problem{code, F("a property has the wrong type")};
     case JsonStatus::kUnsupported:

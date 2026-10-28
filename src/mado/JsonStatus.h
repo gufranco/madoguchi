@@ -13,6 +13,7 @@ enum class JsonStatus : uint8_t {
   kEnd,
   kSyntax,
   kTooLong,
+  kTooShort,
   kOutOfRange,
   kWrongType,
   kTruncated,

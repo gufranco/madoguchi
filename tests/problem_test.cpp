@@ -151,6 +151,8 @@ INSTANTIATE_TEST_SUITE_P(
         JsonProblemCase{mado::JsonStatus::kSyntax, 400U, "the body is not valid JSON"},
         JsonProblemCase{mado::JsonStatus::kTruncated, 400U, "the body is not valid JSON"},
         JsonProblemCase{mado::JsonStatus::kTooLong, 422U, "a string is longer than its maxLength"},
+        JsonProblemCase{mado::JsonStatus::kTooShort, 422U,
+                        "a string is shorter than its minLength"},
         JsonProblemCase{mado::JsonStatus::kOutOfRange, 422U, "a number is outside its range"},
         JsonProblemCase{mado::JsonStatus::kWrongType, 422U, "a property has the wrong type"},
         JsonProblemCase{mado::JsonStatus::kUnsupported, 422U,
