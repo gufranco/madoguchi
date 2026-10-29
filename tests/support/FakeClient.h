@@ -22,7 +22,6 @@ class FakeClient {
   void stop();
 
   void disconnect();
-  void set_remote(IPAddress address);
   void limit_available(size_t max_bytes);
   void limit_write(size_t max_bytes);
   void overstate_block_reads(int extra);

@@ -140,7 +140,3 @@ uint32_t FakeClient::write_calls() const {
 IPAddress FakeClient::remoteIP() const {
   return remote_;
 }
-
-void FakeClient::set_remote(IPAddress address) {
-  remote_ = address;
-}

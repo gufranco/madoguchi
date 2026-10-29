@@ -10,15 +10,8 @@
 
 constexpr uint32_t kTestSession = 7U;
 
-inline bool& anonymous_requests() {
-  static bool anonymous = false;
-  return anonymous;
-}
-
 inline std::string bearer() {
-  return anonymous_requests()
-             ? std::string()
-             : std::string("Authorization: Bearer ") + test_secrets::kToken + "\r\n";
+  return std::string("Authorization: Bearer ") + &test_secrets::kToken[0] + "\r\n";
 }
 
 template <typename AuthorityT, typename FailuresT, typename AccessT>
@@ -34,7 +27,6 @@ GatekeeperT& fresh_gatekeeper() {
   static GatekeeperT instance;
   instance.clock = mado::UptimeClock{};
   instance.access.begin(kTestSession);
-  anonymous_requests() = false;
   return instance;
 }
 
