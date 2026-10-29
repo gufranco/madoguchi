@@ -9,8 +9,8 @@
 
 [English](README.md) | [日本語](README.ja.md) | 简体中文 | [繁體中文 (香港)](README.zh-HK.md)
 
-[![CI](https://github.com/gufranco/madoguchi/actions/workflows/ci.yml/badge.svg)](https://github.com/gufranco/madoguchi/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![ci](https://img.shields.io/github/actions/workflow/status/gufranco/madoguchi/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/gufranco/madoguchi/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/gufranco/madoguchi?style=flat-square&label=license)](LICENSE)
 
 </div>
 
