@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "mado/GuardEntry.h"
+#include "mado/LoginAttempt.h"
 #include "mado/LoginGuard.h"
 #include "mado/LoginGuardTable.h"
 
@@ -14,48 +15,48 @@ constexpr uint32_t kSecond = 0x0A000002UL;
 constexpr uint32_t kThird = 0x0A000003UL;
 constexpr uint32_t kNow = 100U;
 
-void fail(Table& table, const uint32_t address, const uint8_t times) {
+void fail(Table& table, const mado::LoginAttempt& attempt, const uint8_t times) {
   for (uint8_t i = 0U; i < times; ++i) {
-    table.record_failure(address, kNow);
+    table.record_failure(attempt);
   }
 }
 
 TEST(LoginGuardTable, LocksOnlyTheAddressThatFailed) {
   // Arrange
   Table table;
-  fail(table, kFirst, mado::LoginGuard::kMaxFailures);
+  fail(table, {kFirst, kNow}, mado::LoginGuard::kMaxFailures);
 
   // Act
-  const bool second = table.locked(kSecond, kNow);
+  const bool second = table.locked({kSecond, kNow});
 
   // Assert
-  EXPECT_EQ(table.locked(kFirst, kNow), true);
+  EXPECT_EQ(table.locked({kFirst, kNow}), true);
   EXPECT_EQ(second, false);
-  EXPECT_EQ(table.retry_after(kFirst, kNow), mado::LoginGuard::kLockSeconds);
+  EXPECT_EQ(table.retry_after({kFirst, kNow}), mado::LoginGuard::kLockSeconds);
 }
 
 TEST(LoginGuardTable, LocksANewAddressWhileEverySlotIsLocked) {
   // Arrange
   Table table;
-  fail(table, kFirst, mado::LoginGuard::kMaxFailures);
-  fail(table, kSecond, mado::LoginGuard::kMaxFailures);
+  fail(table, {kFirst, kNow}, mado::LoginGuard::kMaxFailures);
+  fail(table, {kSecond, kNow}, mado::LoginGuard::kMaxFailures);
 
   // Act
-  const bool third = table.locked(kThird, kNow);
+  const bool third = table.locked({kThird, kNow});
 
   // Assert
   EXPECT_EQ(third, true);
-  EXPECT_EQ(table.retry_after(kThird, kNow), mado::LoginGuard::kLockSeconds);
+  EXPECT_EQ(table.retry_after({kThird, kNow}), mado::LoginGuard::kLockSeconds);
 }
 
 TEST(LoginGuardTable, ReusesTheSlotOfAnUnlockedAddressWithFewerFailures) {
   // Arrange
   Table table;
-  fail(table, kFirst, mado::LoginGuard::kMaxFailures);
-  fail(table, kSecond, 1U);
+  fail(table, {kFirst, kNow}, mado::LoginGuard::kMaxFailures);
+  fail(table, {kSecond, kNow}, 1U);
 
   // Act
-  table.record_failure(kThird, kNow);
+  table.record_failure({kThird, kNow});
 
   // Assert
   mado::GuardEntry entries[2U] = {};
@@ -69,7 +70,7 @@ TEST(LoginGuardTable, ReusesTheSlotOfAnUnlockedAddressWithFewerFailures) {
 TEST(LoginGuardTable, ClearsAnAddressOnSuccess) {
   // Arrange
   Table table;
-  fail(table, kFirst, 3U);
+  fail(table, {kFirst, kNow}, 3U);
 
   // Act
   table.record_success(kFirst);
@@ -89,8 +90,8 @@ TEST(LoginGuardTable, RestoresALockFromAStoredTable) {
   table.restore(stored);
 
   // Assert
-  EXPECT_EQ(table.locked(kSecond, 0U), true);
-  EXPECT_EQ(table.locked(kFirst, 0U), false);
+  EXPECT_EQ(table.locked({kSecond, 0U}), true);
+  EXPECT_EQ(table.locked({kFirst, 0U}), false);
 }
 
 }

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "GuardEntry.h"
+#include "LoginAttempt.h"
 #include "LoginGuard.h"
 #include "check.h"
 
@@ -18,32 +19,35 @@ class LoginGuardTable {
   static_assert(kSlots > 0U, "a table keeps at least one address");
   static constexpr uint8_t kNoSlot = kSlots;
 
-  bool locked(const uint32_t address, const uint32_t now) const {
-    const uint8_t slot = slot_of(address);
+  bool locked(const LoginAttempt& attempt) const {
+    const uint8_t slot = slot_of(attempt.address);
     if (check(slot <= kNoSlot) && (slot < kNoSlot)) {
-      return guards_[slot].locked(now);
+      return guards_[slot].locked(attempt.now);
     }
-    return !check(free_slot(now) < kNoSlot);
+    return !check(free_slot(attempt.now) < kNoSlot);
   }
 
-  uint32_t retry_after(const uint32_t address, const uint32_t now) const {
-    const uint8_t slot = slot_of(address);
-    const bool known = check(slot <= kNoSlot) && (slot < kNoSlot);
-    const bool open = check(known || (free_slot(now) < kNoSlot));
-    return known ? guards_[slot].retry_after(now) : (open ? 0U : LoginGuard::kLockSeconds);
+  uint32_t retry_after(const LoginAttempt& attempt) const {
+    const uint8_t slot = slot_of(attempt.address);
+    if (check(slot <= kNoSlot) && (slot < kNoSlot)) {
+      return guards_[slot].retry_after(attempt.now);
+    }
+    const bool open = check(free_slot(attempt.now) < kNoSlot);
+    return open ? 0U : LoginGuard::kLockSeconds;
   }
 
-  void record_failure(const uint32_t address, const uint32_t now) {
-    const uint8_t known = slot_of(address);
-    const uint8_t slot = check(known <= kNoSlot) && (known < kNoSlot) ? known : free_slot(now);
+  void record_failure(const LoginAttempt& attempt) {
+    const uint8_t known = slot_of(attempt.address);
+    const uint8_t slot =
+        (check(known <= kNoSlot) && (known < kNoSlot)) ? known : free_slot(attempt.now);
     if (!check(slot < kNoSlot)) {
       return;
     }
-    if (addresses_[slot] != address) {
-      addresses_[slot] = address;
+    if (addresses_[slot] != attempt.address) {
+      addresses_[slot] = attempt.address;
       guards_[slot] = LoginGuard{};
     }
-    guards_[slot].record_failure(now);
+    guards_[slot].record_failure(attempt.now);
   }
 
   void record_success(const uint32_t address) {
@@ -94,8 +98,10 @@ class LoginGuardTable {
           (lightest == kNoSlot) || (guards_[i].failures() < guards_[lightest].failures());
       lightest = (open && lighter) ? i : lightest;
     }
-    const bool scanned = check(empty <= kNoSlot) && check(lightest <= kNoSlot);
-    return scanned ? ((empty < kNoSlot) ? empty : lightest) : kNoSlot;
+    if (!(check(empty <= kNoSlot) && check(lightest <= kNoSlot))) {
+      return kNoSlot;
+    }
+    return (empty < kNoSlot) ? empty : lightest;
   }
 
   uint32_t addresses_[kSlots] = {};

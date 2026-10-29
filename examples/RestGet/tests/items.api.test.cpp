@@ -242,7 +242,7 @@ TEST_F(RestGetTest, RefusesAnApiRequestWithoutAToken) {
 TEST_F(RestGetTest, IssuesATokenForTheRightPassword) {
   // Arrange
   const std::string body =
-      std::string(R"({"username":"admin","password":")") + test_secrets::kPassword + R"("})";
+      std::string(R"({"username":"admin","password":")") + &test_secrets::kPassword[0] + R"("})";
 
   // Act
   const std::string response =

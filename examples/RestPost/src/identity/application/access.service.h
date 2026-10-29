@@ -5,6 +5,7 @@
 #define REST_POST_IDENTITY_ACCESS_SERVICE_H
 
 #include <mado/GuardEntry.h>
+#include <mado/LoginAttempt.h>
 #include <mado/LoginGuard.h>
 #include <mado/LoginGuardTable.h>
 #include <mado/TokenClaims.h>
@@ -53,11 +54,12 @@ class AccessService {
     if (!mado::check(authority_->provisioned())) {
       return Admission::kUnprovisioned;
     }
-    return mado::check(!guards_.locked(address, now)) ? Admission::kOpen : Admission::kLocked;
+    return mado::check(!guards_.locked(mado::LoginAttempt{address, now})) ? Admission::kOpen
+                                                                          : Admission::kLocked;
   }
 
   uint32_t retry_after(const uint32_t address, const uint32_t now) const {
-    const uint32_t wait = guards_.retry_after(address, now);
+    const uint32_t wait = guards_.retry_after(mado::LoginAttempt{address, now});
     const bool waiting =
         mado::check(wait > 0U) && mado::check(wait <= mado::LoginGuard::kLockSeconds);
     return waiting ? wait : 1U;
@@ -69,7 +71,7 @@ class AccessService {
     const bool complete =
         mado::check(credentials_status(credentials) == CredentialsStatus::kComplete);
     if (!(complete && mado::check(authority_->matches(credentials)))) {
-      guards_.record_failure(address, now);
+      guards_.record_failure(mado::LoginAttempt{address, now});
       remember();
       return SignInStatus::kRefused;
     }
