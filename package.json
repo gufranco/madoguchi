@@ -22,7 +22,7 @@
     "happy-dom": "21.0.4",
     "html-validate": "11.18.0",
     "typescript": "7.0.2",
-    "vite": "8.3.5",
+    "vite": "8.3.6",
     "vitest": "5.0.5"
   }
 }
