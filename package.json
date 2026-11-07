@@ -13,7 +13,7 @@
     "e2e": "pnpm --filter @madoguchi/e2e run e2e"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.4",
+    "@biomejs/biome": "2.6.6",
     "@faker-js/faker": "10.6.0",
     "@minify-html/node": "0.18.1",
     "@playwright/test": "1.64.1",
