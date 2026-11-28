@@ -207,8 +207,8 @@ importers:
         specifier: 21.0.4
         version: 21.0.4
       html-validate:
-        specifier: 11.22.1
-        version: 11.22.1(vitest@5.1.2)
+        specifier: 11.23.0
+        version: 11.23.0(vitest@5.1.2)
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -758,8 +758,8 @@ packages:
     resolution: {integrity: sha512-tFm+GaLBgo6o0awHnvHaNoraVo27qJ+2tZEtZ+cIa08hXbeitrxAJajLI05hsUy/2/YTKcUjQYzHe5mCcraLBw==}
     engines: {node: '>=20.0.0'}
 
-  html-validate@11.22.1:
-    resolution: {integrity: sha512-LGA6txEv+LvFQ9/BGSLDXikoilm+ptHaWaD6QM9ZzfGGTKTbYZfJI4or7cCH+zfW/uO0SvNuKR/hfUJLeNbPtA==}
+  html-validate@11.23.0:
+    resolution: {integrity: sha512-IBJ+UeBhwpmOuxtOGyp69XwmnkX6J1XSA3r+UMHTiN2ZnYvFPURdLC9csPNVWWzctnnbbXlWxeh6TbkJFp22Qw==}
     engines: {node: ^22.22.0 || >= 24.8.0}
     hasBin: true
     peerDependencies:
@@ -1390,7 +1390,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  html-validate@11.22.1(vitest@5.1.2):
+  html-validate@11.23.0(vitest@5.1.2):
     dependencies:
       '@html-validate/stylish': 6.1.0
       '@sidvind/better-ajv-errors': 7.0.0(ajv@8.20.0)
